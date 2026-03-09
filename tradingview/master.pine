@@ -8,6 +8,7 @@ indicator("Master Indicator", overlay=true)
 minPctMove = input.float(20.0, title="Minimum Movement (%)", step=1.0)
 trackYears = input.int(5, title="Track History (Years)", minval=1, maxval=10, step=1)
 bgBoxColor = input.color(color.new(color.green, 75), title="V20 ackground Color")
+showRefLines = input.bool(true, title="Show V20 reference Lines")
 upperRefLineColor = input.color(color.new(color.red, 30), title="V20 Upper Ref Line Color")
 lowerRefLineColor = input.color(color.new(color.green, 30), title="V20 Lower Ref Line Color")
 
@@ -58,8 +59,9 @@ if longCondition
     boxBottom = sequenceStartLow - (sequenceStartLow * 0.00) // Extend slightly below the start low
     box.new(left=boxLeft, top=boxTop, right=bar_index, bottom=boxBottom, bgcolor=bgBoxColor, border_color=na)
     // Draw horizontal lines extending to the price scale on the right
-    line.new(x1=boxLeft, y1=high, x2=bar_index, y2=high, color=upperRefLineColor, style=line.style_dashed, width=1, extend=extend.right)
-    line.new(x1=boxLeft, y1=sequenceStartLow, x2=bar_index, y2=sequenceStartLow, color=lowerRefLineColor, style=line.style_dashed, width=1, extend=extend.right)
+    if showRefLines
+        line.new(x1=boxLeft, y1=high, x2=bar_index, y2=high, color=upperRefLineColor, style=line.style_dashed, width=1, extend=extend.right)
+        line.new(x1=boxLeft, y1=sequenceStartLow, x2=bar_index, y2=sequenceStartLow, color=lowerRefLineColor, style=line.style_dashed, width=1, extend=extend.right)
 
 // Keep track of the high and low of the most recently triggered signal to plot on the price scale
 var float lastSignalHigh = na
@@ -70,6 +72,6 @@ if longCondition
     lastSignalLow := sequenceStartLow
 
 // Use plot with trackprice=true to natively pin the latest values onto the right-hand price scale exactly like native indicator lines
-plot(lastSignalHigh, title="Sequence High", color=upperRefLineColor, trackprice=true, show_last=1, display=display.price_scale)
-plot(lastSignalLow, title="Sequence Low", color=lowerRefLineColor, trackprice=true, show_last=1, display=display.price_scale)
+plot(lastSignalHigh, title="Sequence High", color=showRefLines ? upperRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
+plot(lastSignalLow, title="Sequence Low", color=showRefLines ? lowerRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
 
