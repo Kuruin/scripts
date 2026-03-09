@@ -6,6 +6,7 @@ indicator("Master Indicator", overlay=true)
 
 // --- Input Parameters ---
 minPctMove = input.float(20.0, title="Minimum Movement (%)", step=1.0)
+trackYears = input.int(5, title="Track History (Years)", minval=1, maxval=10, step=1)
 bgBoxColor = input.color(color.new(color.green, 75), title="V20 ackground Color")
 upperRefLineColor = input.color(color.new(color.red, 30), title="V20 Upper Ref Line Color")
 lowerRefLineColor = input.color(color.new(color.green, 30), title="V20 Lower Ref Line Color")
@@ -33,8 +34,12 @@ if greenCandleCount > 0 and not na(sequenceStartLow)
     // Calculate movement percentage from start low to current high
     movePercent := ((high - sequenceStartLow) / sequenceStartLow) * 100
 
-// Condition: Currently green, reached 20% move, and haven't fired a signal for this sequence yet
-longCondition = isGreen and (movePercent >= minPctMove) and not signalFired
+// Time filter logic
+msPerYear = 1000 * 60 * 60 * 24 * 365.25
+isWithinTime = time >= (timenow - (trackYears * msPerYear))
+
+// Condition: Currently green, reached min move, haven't fired yet, and within allowed history
+longCondition = isGreen and (movePercent >= minPctMove) and not signalFired and isWithinTime
 
 if longCondition
     signalFired := true
