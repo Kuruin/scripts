@@ -1,0 +1,69 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Custom Strategy
+
+//@version=6
+indicator("Master Indicator", overlay=true)
+
+// --- Input Parameters ---
+minPctMove = input.float(20.0, title="Minimum Movement (%)", step=1.0)
+bgBoxColor = input.color(color.new(color.green, 75), title="V20 ackground Color")
+refLineColor = input.color(color.new(color.gray, 50), title="V20 Reference Line Color")
+
+// --- Strategy Logic ---
+var float sequenceStartLow = na
+var int greenCandleCount = 0
+var bool signalFired = false
+
+isGreen = close > open
+
+if not isGreen
+    // Reset trackers if it's not a green candle (i.e., red or doji)
+    sequenceStartLow := na
+    greenCandleCount := 0
+    signalFired := false
+else
+    if greenCandleCount == 0
+        // Record the low of the first green candle in the sequence
+        sequenceStartLow := low
+    greenCandleCount += 1
+
+movePercent = 0.0
+if greenCandleCount > 0 and not na(sequenceStartLow)
+    // Calculate movement percentage from start low to current high
+    movePercent := ((high - sequenceStartLow) / sequenceStartLow) * 100
+
+// Condition: Currently green, reached 20% move, and haven't fired a signal for this sequence yet
+longCondition = isGreen and (movePercent >= minPctMove) and not signalFired
+
+if longCondition
+    signalFired := true
+
+// --- Alerts ---
+if longCondition
+    alert("Buy Signal Triggered!", alert.freq_once_per_bar_close)
+
+// --- Plotting ---
+// Plot exactly above the high price level using absolute coordinates
+if longCondition
+    label.new(x=bar_index, y=high + (high * 0.02), text=str.tostring(movePercent, "#.##") + "%", style=label.style_label_down, color=#312d2d, textcolor=color.white)
+    // Draw a translucent green background box over the entire valid sequence
+    boxLeft = bar_index - (greenCandleCount - 1)
+    boxTop = high + (high * 0.00) // Extend slightly above the highest point
+    boxBottom = sequenceStartLow - (sequenceStartLow * 0.00) // Extend slightly below the start low
+    box.new(left=boxLeft, top=boxTop, right=bar_index, bottom=boxBottom, bgcolor=bgBoxColor, border_color=na)
+    // Draw horizontal lines extending to the price scale on the right
+    line.new(x1=boxLeft, y1=high, x2=bar_index, y2=high, color=refLineColor, style=line.style_dashed, width=1, extend=extend.right)
+    line.new(x1=boxLeft, y1=sequenceStartLow, x2=bar_index, y2=sequenceStartLow, color=refLineColor, style=line.style_dashed, width=1, extend=extend.right)
+
+// Keep track of the high and low of the most recently triggered signal to plot on the price scale
+var float lastSignalHigh = na
+var float lastSignalLow = na
+
+if longCondition
+    lastSignalHigh := high
+    lastSignalLow := sequenceStartLow
+
+// Use plot with trackprice=true to natively pin the latest values onto the right-hand price scale exactly like native indicator lines
+plot(lastSignalHigh, title="Sequence High", color=refLineColor, trackprice=true, show_last=1, display=display.price_scale)
+plot(lastSignalLow, title="Sequence Low", color=refLineColor, trackprice=true, show_last=1, display=display.price_scale)
+
