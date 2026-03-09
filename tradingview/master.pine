@@ -5,12 +5,13 @@
 indicator("Master Indicator", overlay=true)
 
 // --- Input Parameters ---
-minPctMove = input.float(20.0, title="Minimum Movement (%)", step=1.0)
-trackYears = input.int(5, title="Track History (Years)", minval=1, maxval=10, step=1)
-bgBoxColor = input.color(color.new(color.green, 75), title="V20 ackground Color")
-showRefLines = input.bool(true, title="Show V20 reference Lines")
-upperRefLineColor = input.color(color.new(color.red, 30), title="V20 Upper Ref Line Color")
-lowerRefLineColor = input.color(color.new(color.green, 30), title="V20 Lower Ref Line Color")
+showV20 = input.bool(true, title="Enable V20 Strategy", group="V20 Settings")
+minPctMove = input.float(20.0, title="Minimum Movement (%)", step=1.0, group="V20 Settings")
+trackYears = input.int(5, title="Track History (Years)", minval=1, maxval=10, step=1, group="V20 Settings")
+bgBoxColor = input.color(color.new(color.green, 75), title="V20 Background Color", group="V20 Settings")
+showRefLines = input.bool(true, title="Show V20 reference Lines", group="V20 Settings")
+upperRefLineColor = input.color(color.new(color.red, 30), title="V20 Upper Ref Line Color", group="V20 Settings")
+lowerRefLineColor = input.color(color.new(color.green, 30), title="V20 Lower Ref Line Color", group="V20 Settings")
 
 // --- Strategy Logic ---
 var float sequenceStartLow = na
@@ -39,8 +40,8 @@ if greenCandleCount > 0 and not na(sequenceStartLow)
 msPerYear = 1000 * 60 * 60 * 24 * 365.25
 isWithinTime = time >= (timenow - (trackYears * msPerYear))
 
-// Condition: Currently green, reached min move, haven't fired yet, and within allowed history
-longCondition = isGreen and (movePercent >= minPctMove) and not signalFired and isWithinTime
+// Condition: Currently green, reached min move, haven't fired yet, and within allowed history, and strategy is enabled
+longCondition = showV20 and isGreen and (movePercent >= minPctMove) and not signalFired and isWithinTime
 
 if longCondition
     signalFired := true
@@ -72,6 +73,6 @@ if longCondition
     lastSignalLow := sequenceStartLow
 
 // Use plot with trackprice=true to natively pin the latest values onto the right-hand price scale exactly like native indicator lines
-plot(lastSignalHigh, title="Sequence High", color=showRefLines ? upperRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
-plot(lastSignalLow, title="Sequence Low", color=showRefLines ? lowerRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
+plot(showV20 ? lastSignalHigh : na, title="Sequence High", color=showRefLines ? upperRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
+plot(showV20 ? lastSignalLow : na, title="Sequence Low", color=showRefLines ? lowerRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
 
