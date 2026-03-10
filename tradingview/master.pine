@@ -21,6 +21,12 @@ sma50Color = input.color(color.green, title="SMA 50 Color", group="SMA Strategy"
 sma50Width = input.int(1, title="SMA 50 Width", minval=1, maxval=4, group="SMA Strategy")
 sma200Color = input.color(color.white, title="SMA 200 Color", group="SMA Strategy")
 sma200Width = input.int(2, title="SMA 200 Width", minval=1, maxval=4, group="SMA Strategy")
+showSMABgBox = input.bool(true, title="Show SMA Background", group="SMA Strategy")
+smaBgBoxColor = input.color(color.new(color.green, 75), title="SMA Background Color", group="SMA Strategy")
+showSMAAvgBgBox = input.bool(true, title="Show SMA Avg Background", group="SMA Strategy")
+smaAvgBgBoxColor = input.color(color.new(color.yellow, 75), title="SMA Avg Background Color", group="SMA Strategy")
+showSMASellDays = input.bool(true, title="Show Days Held on Sell", group="SMA Strategy")
+showSMASellGain = input.bool(true, title="Show Gain % on Sell", group="SMA Strategy")
 
 // --- Strategy Logic ---
 var float sequenceStartLow = na
@@ -98,6 +104,11 @@ plot(showSMA ? sma200 : na, title="SMA 200", color=sma200Color, linewidth=sma200
 var string currentSMAPosition = "NONE" // Tracks whether we are currently "LONG" or "SHORT" or "NONE"
 var float buyPrice = na
 var int lastAvgLevel = 0 // Tracks how many 10% drops we've averaged on
+var box currentSMABox = na
+var float currentSMAHigh = na
+var float currentSMALow = na
+var box currentSMAAvgBox = na
+var int buyTime = na
 
 // SMA BUY Condition: 200 is at top, 50 is in middle, 20 is at bottom AND price closes below 20
 smaAlignmentTrue = (sma200 > sma50) and (sma50 > sma20) and (close < sma20)
@@ -109,10 +120,26 @@ smaBuyCondition = smaAlignmentJustCrossed[1] and currentSMAPosition != "LONG"
 if showSMA and smaBuyCondition
     currentSMAPosition := "LONG"
     buyPrice := open
+    buyTime := time
     lastAvgLevel := 0
+    currentSMAHigh := high
+    currentSMALow := low
+    if showSMABgBox
+        currentSMABox := box.new(left=bar_index, top=currentSMAHigh, right=bar_index, bottom=currentSMALow, bgcolor=smaBgBoxColor, border_color=na)
+    currentSMAAvgBox := na
     alert("SMA Align Buy Signal Triggered!", alert.freq_once_per_bar_close)
     labelText = str.format("SMA Buy\n{0}", str.tostring(open, "#.##"))
     label.new(x=bar_index, y=low, text=labelText, style=label.style_label_up, color=color.rgb(53, 78, 24), textcolor=color.white)
+
+if showSMA and currentSMAPosition == "LONG"
+    currentSMAHigh := math.max(currentSMAHigh, high)
+    currentSMALow := math.min(currentSMALow, low)
+    if showSMABgBox and not na(currentSMABox)
+        box.set_right(currentSMABox, bar_index)
+        box.set_top(currentSMABox, currentSMAHigh)
+        box.set_bottom(currentSMABox, currentSMALow)
+    if showSMAAvgBgBox and not na(currentSMAAvgBox)
+        box.set_right(currentSMAAvgBox, bar_index)
 
 // --- Average Logic ---
 // Track how far the price has fallen from the original buy price
@@ -125,6 +152,8 @@ avgSignalCondition = currentSMAPosition == "LONG" and currentAvgLevel > lastAvgL
 
 if showSMA and avgSignalCondition
     lastAvgLevel := currentAvgLevel
+    if showSMAAvgBgBox
+        currentSMAAvgBox := box.new(left=bar_index, top=buyPrice, right=bar_index, bottom=low, bgcolor=smaAvgBgBoxColor, border_color=na)
     alert("SMA Average Signal Triggered!", alert.freq_once_per_bar_close)
     exactAvgPriceTarget = buyPrice * (1.0 - (currentAvgLevel * 0.10))
     labelAvgText = str.format("Avg {0}%\n{1}", str.tostring(currentAvgLevel * 10), str.tostring(exactAvgPriceTarget, "#.##"))
@@ -138,9 +167,17 @@ smaSellAlignmentJustCrossed = smaSellAlignmentTrue and not smaSellAlignmentTrue[
 smaSellCondition = smaSellAlignmentJustCrossed[1] and currentSMAPosition == "LONG"
 
 if showSMA and smaSellCondition
+    heldDays = not na(buyTime) ? math.floor((time - buyTime) / 86400000) : 0
+    tradeGain = not na(buyPrice) ? ((open - buyPrice) / buyPrice) * 100 : 0.0
     currentSMAPosition := "NONE" // Reset to NONE
     buyPrice := na
+    buyTime := na
     lastAvgLevel := 0
     alert("SMA Align Sell Signal Triggered!", alert.freq_once_per_bar_close)
-    labelSellText = str.format("SMA Sell\n{0}", str.tostring(open, "#.##"))
+    
+    labelBaseText = str.format("SMA Sell\n{0}", str.tostring(open, "#.##"))
+    labelDaysText = showSMASellDays ? str.format("\nDays: {0}", str.tostring(heldDays)) : ""
+    labelGainText = showSMASellGain ? str.format("\nGain: {0}%", str.tostring(tradeGain, "#.##")) : ""
+    
+    labelSellText = labelBaseText + labelDaysText + labelGainText
     label.new(x=bar_index, y=high, text=labelSellText, style=label.style_label_down, color=color.rgb(180, 48, 48), textcolor=color.white)
