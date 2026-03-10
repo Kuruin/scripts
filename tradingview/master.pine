@@ -28,6 +28,15 @@ smaAvgBgBoxColor = input.color(color.new(color.yellow, 75), title="SMA Avg Backg
 showSMASellDays = input.bool(true, title="Show Days Held on Sell", group="SMA Strategy")
 showSMASellGain = input.bool(true, title="Show Gain % on Sell", group="SMA Strategy")
 
+// --- Envelope Strategy Inputs ---
+showEnv = input.bool(true, title="Enable Envelope Strategy", group="Envelope Strategy")
+envLen = input.int(20, title="Length", minval=1, group="Envelope Strategy")
+envPercent = input.float(10.0, title="Percent", step=1.0, group="Envelope Strategy")
+envExponential = input.bool(false, title="Exponential", group="Envelope Strategy")
+envBasisColor = input.color(#FF6D00, title="Basis Color", group="Envelope Strategy")
+envBandColor = input.color(#2962FF, title="Band Color", group="Envelope Strategy")
+envBgColor = input.color(color.rgb(33, 150, 243, 95), title="Background Color", group="Envelope Strategy")
+
 // --- Strategy Logic ---
 var float sequenceStartLow = na
 var int greenCandleCount = 0
@@ -181,3 +190,14 @@ if showSMA and smaSellCondition
     
     labelSellText = labelBaseText + labelDaysText + labelGainText
     label.new(x=bar_index, y=high, text=labelSellText, style=label.style_label_down, color=color.rgb(180, 48, 48), textcolor=color.white)
+
+// --- Envelope Strategy Logic & Plotting ---
+envBasis = envExponential ? ta.ema(close, envLen) : ta.sma(close, envLen)
+envK = envPercent / 100.0
+envUpper = envBasis * (1 + envK)
+envLower = envBasis * (1 - envK)
+
+plot(showEnv ? envBasis : na, "Envelope Basis", color=envBasisColor)
+envU = plot(showEnv ? envUpper : na, "Envelope Upper", color=envBandColor)
+envL = plot(showEnv ? envLower : na, "Envelope Lower", color=envBandColor)
+fill(envU, envL, color=showEnv ? envBgColor : na, title="Envelope Background")
