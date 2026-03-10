@@ -30,8 +30,8 @@ showSMASellGain = input.bool(true, title="Show Gain % on Sell", group="SMA Strat
 
 // --- Envelope Strategy Inputs ---
 showEnv = input.bool(true, title="Enable Envelope Strategy", group="Envelope Strategy")
-envLen = input.int(20, title="Length", minval=1, group="Envelope Strategy")
-envPercent = input.float(10.0, title="Percent", step=1.0, group="Envelope Strategy")
+envLen = input.int(200, title="Length", minval=1, group="Envelope Strategy")
+envPercent = input.float(14.0, title="Percent", step=1.0, group="Envelope Strategy")
 envExponential = input.bool(false, title="Exponential", group="Envelope Strategy")
 envBasisColor = input.color(#FF6D00, title="Basis Color", group="Envelope Strategy")
 envBandColor = input.color(#2962FF, title="Band Color", group="Envelope Strategy")
