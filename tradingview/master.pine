@@ -46,7 +46,10 @@ showEnv = input.bool(true, title="Enable Envelope Strategy", group="Enable Strat
 minPctMove = input.float(20.0, title="Minimum Movement (%)", step=1.0, group="V20 Settings", tooltip="The minimum required percentage movement from the sequence start low to trigger a valid V20 buy signal.")
 trackYears = input.int(5, title="Track History (Years)", minval=1, maxval=10, step=1, group="V20 Settings", tooltip="How many years back the strategy should look to validate a sequence.")
 bgBoxColor = input.color(color.new(color.green, 75), title="V20 Background Color", group="V20 Settings", tooltip="Color of the dynamic box drawn over an active V20 sequence.")
-showRefLines = input.bool(true, title="Show V20 reference Lines", group="V20 Settings", tooltip="Toggles dashed horizontal reference lines extending from the sequence high and low.")
+showRefLines = input.bool(true, title="Show V20 reference Lines", group="V20 Settings", tooltip="Toggles horizontal reference lines extending from the sequence high and low.")
+refLineStyleStr = input.string("Solid", title="V20 Ref Line Style", options=["Solid", "Dashed", "Dotted"], group="V20 Settings", tooltip="Style of the V20 reference lines.")
+refLineStyle = refLineStyleStr == "Solid" ? line.style_solid : refLineStyleStr == "Dashed" ? line.style_dashed : line.style_dotted
+refLineWidth = input.int(2, title="V20 Ref Line Width", minval=1, maxval=4, group="V20 Settings", tooltip="Line thickness for the V20 reference lines.")
 upperRefLineColor = input.color(color.new(color.red, 30), title="V20 Upper Ref Line Color", group="V20 Settings", tooltip="Color of the upper reference line and price scale label.")
 lowerRefLineColor = input.color(color.new(color.green, 30), title="V20 Lower Ref Line Color", group="V20 Settings", tooltip="Color of the lower reference line and price scale label.")
 
@@ -120,8 +123,8 @@ if longCondition
     box.new(left=boxLeft, top=boxTop, right=bar_index, bottom=boxBottom, bgcolor=bgBoxColor, border_color=na)
     // Draw horizontal lines extending to the price scale on the right
     if showRefLines
-        line.new(x1=boxLeft, y1=high, x2=bar_index, y2=high, color=upperRefLineColor, style=line.style_dashed, width=1, extend=extend.right)
-        line.new(x1=boxLeft, y1=sequenceStartLow, x2=bar_index, y2=sequenceStartLow, color=lowerRefLineColor, style=line.style_dashed, width=1, extend=extend.right)
+        line.new(x1=boxLeft, y1=high, x2=bar_index, y2=high, color=upperRefLineColor, style=refLineStyle, width=refLineWidth, extend=extend.right)
+        line.new(x1=boxLeft, y1=sequenceStartLow, x2=bar_index, y2=sequenceStartLow, color=lowerRefLineColor, style=refLineStyle, width=refLineWidth, extend=extend.right)
 
 // Keep track of the high and low of the most recently triggered signal to plot on the price scale
 var float lastSignalHigh = na
