@@ -13,6 +13,15 @@ showRefLines = input.bool(true, title="Show V20 reference Lines", group="V20 Set
 upperRefLineColor = input.color(color.new(color.red, 30), title="V20 Upper Ref Line Color", group="V20 Settings")
 lowerRefLineColor = input.color(color.new(color.green, 30), title="V20 Lower Ref Line Color", group="V20 Settings")
 
+// --- SMA Strategy Inputs ---
+showSMA = input.bool(true, title="Enable SMA Strategy", group="SMA Strategy")
+sma20Color = input.color(color.red, title="SMA 20 Color", group="SMA Strategy")
+sma20Width = input.int(1, title="SMA 20 Width", minval=1, maxval=4, group="SMA Strategy")
+sma50Color = input.color(color.green, title="SMA 50 Color", group="SMA Strategy")
+sma50Width = input.int(1, title="SMA 50 Width", minval=1, maxval=4, group="SMA Strategy")
+sma200Color = input.color(color.white, title="SMA 200 Color", group="SMA Strategy")
+sma200Width = input.int(2, title="SMA 200 Width", minval=1, maxval=4, group="SMA Strategy")
+
 // --- Strategy Logic ---
 var float sequenceStartLow = na
 var int greenCandleCount = 0
@@ -76,3 +85,62 @@ if longCondition
 plot(showV20 ? lastSignalHigh : na, title="Sequence High", color=showRefLines ? upperRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
 plot(showV20 ? lastSignalLow : na, title="Sequence Low", color=showRefLines ? lowerRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
 
+// --- SMA Strategy Logic & Plotting ---
+sma20 = ta.sma(close, 20)
+sma50 = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+
+plot(showSMA ? sma20 : na, title="SMA 20", color=sma20Color, linewidth=sma20Width)
+plot(showSMA ? sma50 : na, title="SMA 50", color=sma50Color, linewidth=sma50Width)
+plot(showSMA ? sma200 : na, title="SMA 200", color=sma200Color, linewidth=sma200Width)
+
+// --- SMA Position State ---
+var string currentSMAPosition = "NONE" // Tracks whether we are currently "LONG" or "SHORT" or "NONE"
+var float buyPrice = na
+var int lastAvgLevel = 0 // Tracks how many 10% drops we've averaged on
+
+// SMA BUY Condition: 200 is at top, 50 is in middle, 20 is at bottom AND price closes below 20
+smaAlignmentTrue = (sma200 > sma50) and (sma50 > sma20) and (close < sma20)
+smaAlignmentJustCrossed = smaAlignmentTrue and not smaAlignmentTrue[1]
+
+// We enter on the Open of the very next candle after the crossover candle, IF we aren't already long
+smaBuyCondition = smaAlignmentJustCrossed[1] and currentSMAPosition != "LONG"
+
+if showSMA and smaBuyCondition
+    currentSMAPosition := "LONG"
+    buyPrice := open
+    lastAvgLevel := 0
+    alert("SMA Align Buy Signal Triggered!", alert.freq_once_per_bar_close)
+    labelText = str.format("SMA Buy\n{0}", str.tostring(open, "#.##"))
+    label.new(x=bar_index, y=low, text=labelText, style=label.style_label_up, color=color.rgb(53, 78, 24), textcolor=color.white)
+
+// --- Average Logic ---
+// Track how far the price has fallen from the original buy price
+fallPercent = currentSMAPosition == "LONG" and not na(buyPrice) ? ((buyPrice - low) / buyPrice) * 100 : 0.0
+// We want to average every 10% drop (e.g., 10%, 20%, 30%, etc.)
+currentAvgLevel = math.floor(fallPercent / 10)
+
+// If we crossed a new 10% threshold, trigger an average signal
+avgSignalCondition = currentSMAPosition == "LONG" and currentAvgLevel > lastAvgLevel and currentAvgLevel >= 1
+
+if showSMA and avgSignalCondition
+    lastAvgLevel := currentAvgLevel
+    alert("SMA Average Signal Triggered!", alert.freq_once_per_bar_close)
+    exactAvgPriceTarget = buyPrice * (1.0 - (currentAvgLevel * 0.10))
+    labelAvgText = str.format("Avg {0}%\n{1}", str.tostring(currentAvgLevel * 10), str.tostring(exactAvgPriceTarget, "#.##"))
+    label.new(x=bar_index, y=low - (low * 0.01), text=labelAvgText, style=label.style_label_up, color=color.rgb(139, 105, 41), textcolor=color.white)
+
+// --- SMA Sell Condition ---
+// 1. Original Rules: 200 is at bottom, 50 is in middle, 20 is at top AND price closes above 20
+smaSellAlignmentTrue = (sma20 > sma50) and (sma50 > sma200) and (close > sma20)
+smaSellAlignmentJustCrossed = smaSellAlignmentTrue and not smaSellAlignmentTrue[1]
+// We enter on the Open of the very next candle after the crossover candle, IF we are currently long
+smaSellCondition = smaSellAlignmentJustCrossed[1] and currentSMAPosition == "LONG"
+
+if showSMA and smaSellCondition
+    currentSMAPosition := "NONE" // Reset to NONE
+    buyPrice := na
+    lastAvgLevel := 0
+    alert("SMA Align Sell Signal Triggered!", alert.freq_once_per_bar_close)
+    labelSellText = str.format("SMA Sell\n{0}", str.tostring(open, "#.##"))
+    label.new(x=bar_index, y=high, text=labelSellText, style=label.style_label_down, color=color.rgb(180, 48, 48), textcolor=color.white)
