@@ -40,6 +40,7 @@ indicator(title="Master Indicator - V20, SMA & Envelope v1.0", shorttitle="Maste
 // Master Toggles
 showV20 = input.bool(true, title="Enable V20 Strategy", group="Enable Strategies", tooltip="Toggles the entire V20 volatility tracking strategy on or off.")
 showSMA = input.bool(true, title="Enable SMA Strategy", group="Enable Strategies", tooltip="Toggles the entire SMA alignment strategy on or off.")
+showExtraSMA = input.bool(false, title="Enable Extra SMA", group="Enable Strategies", tooltip="Toggles the extra standalone Simple Moving Average on or off.")
 showEnv = input.bool(true, title="Enable Envelope Strategy", group="Enable Strategies", tooltip="Toggles the Envelope indicator on or off.")
 
 // --- V20 Strategy Inputs ---
@@ -60,6 +61,12 @@ sma50Color = input.color(color.green, title="SMA 50 Color", group="SMA Strategy"
 sma50Width = input.int(1, title="SMA 50 Width", minval=1, maxval=4, group="SMA Strategy", tooltip="Line thickness for the SMA 50.")
 sma200Color = input.color(color.white, title="SMA 200 Color", group="SMA Strategy", tooltip="Color for the 200-period Simple Moving Average.")
 sma200Width = input.int(2, title="SMA 200 Width", minval=1, maxval=4, group="SMA Strategy", tooltip="Line thickness for the SMA 200.")
+
+// --- Extra SMA Inputs ---
+extraSMALength = input.int(300, title="Extra SMA Length", minval=1, group="Extra SMA Settings", tooltip="Lookback period for the extra standalone Simple Moving Average.")
+extraSMAColor = input.color(color.yellow, title="Extra SMA Color", group="Extra SMA Settings", tooltip="Color for the extra standalone Simple Moving Average.")
+extraSMAWidth = input.int(1, title="Extra SMA Width", minval=1, maxval=4, group="Extra SMA Settings", tooltip="Line thickness for the extra standalone SMA.")
+
 showSMABgBox = input.bool(true, title="Show SMA Background", group="SMA Strategy", tooltip="Draws a dynamic background box highlighting the bounds of an active SMA sequence.")
 smaBgBoxColor = input.color(color.new(color.green, 75), title="SMA Background Color", group="SMA Strategy", tooltip="Color of the dynamic background box for the main SMA entry.")
 showSMAAvgBgBox = input.bool(true, title="Show SMA Avg Background", group="SMA Strategy", tooltip="Draws a background box down to the low of candles that trigger SMA Average Signals.")
@@ -146,6 +153,10 @@ sma200 = ta.sma(close, 200)
 plot(showSMA ? sma20 : na, title="SMA 20", color=sma20Color, linewidth=sma20Width)
 plot(showSMA ? sma50 : na, title="SMA 50", color=sma50Color, linewidth=sma50Width)
 plot(showSMA ? sma200 : na, title="SMA 200", color=sma200Color, linewidth=sma200Width)
+
+// --- Extra SMA Logic & Plotting ---
+extraSMA = ta.sma(close, extraSMALength)
+plot(showExtraSMA ? extraSMA : na, title="Extra SMA", color=extraSMAColor, linewidth=extraSMAWidth)
 
 // --- SMA Position State ---
 var string currentSMAPosition = "NONE" // Tracks whether we are currently "LONG" or "SHORT" or "NONE"
