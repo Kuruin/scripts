@@ -46,6 +46,7 @@ showEnv = input.bool(true, title="Enable Envelope Strategy", group="Enable Strat
 // --- V20 Strategy Inputs ---
 minPctMove = input.float(20.0, title="Minimum Movement (%)", step=1.0, group="V20 Settings", tooltip="The minimum required percentage movement from the sequence start low to trigger a valid V20 buy signal.")
 trackYears = input.int(5, title="Track History (Years)", minval=1, maxval=10, step=1, group="V20 Settings", tooltip="How many years back the strategy should look to validate a sequence.")
+hideCompletedV20 = input.bool(true, title="Hide Completed V20 Trades", group="V20 Settings", tooltip="When enabled, V20 reference lines and boxes are automatically hidden once the price cycles down to touch the lower level and then back up to touch the upper level.")
 bgBoxColor = input.color(color.new(color.green, 75), title="V20 Background Color", group="V20 Settings", tooltip="Color of the dynamic box drawn over an active V20 sequence.")
 showRefLines = input.bool(true, title="Show V20 reference Lines", group="V20 Settings", tooltip="Toggles horizontal reference lines extending from the sequence high and low.")
 refLineStyleStr = input.string("Solid", title="V20 Ref Line Style", options=["Solid", "Dashed", "Dotted"], group="V20 Settings", tooltip="Style of the V20 reference lines.")
@@ -119,31 +120,81 @@ if longCondition
 if longCondition
     alert("Buy Signal Triggered!", alert.freq_once_per_bar_close)
 
+// --- V20 Trade Tracking Types ---
+type V20Trade
+    box bgBox
+    label pctLabel
+    line upperLine
+    line lowerLine
+    float tradeHigh
+    float tradeLow
+    int state // 0: Active, 1: Touched Lower exactly or below
+    int startBar
+
+var v20Trades = array.new<V20Trade>()
+
 // --- Plotting ---
 // Plot exactly above the high price level using absolute coordinates
 if longCondition
-    label.new(x=bar_index, y=high + (high * 0.02), text=str.tostring(movePercent, "#.##") + "%", style=label.style_label_down, color=#312d2d, textcolor=color.white)
     // Draw a translucent green background box over the entire valid sequence
     boxLeft = bar_index - (greenCandleCount - 1)
     boxTop = high + (high * 0.00) // Extend slightly above the highest point
     boxBottom = sequenceStartLow - (sequenceStartLow * 0.00) // Extend slightly below the start low
-    box.new(left=boxLeft, top=boxTop, right=bar_index, bottom=boxBottom, bgcolor=bgBoxColor, border_color=na)
-    // Draw horizontal lines extending to the price scale on the right
+    
+    newLabel = label.new(x=bar_index, y=high + (high * 0.02), text=str.tostring(movePercent, "#.##") + "%", style=label.style_label_down, color=#312d2d, textcolor=color.white)
+    newBox = box.new(left=boxLeft, top=boxTop, right=bar_index, bottom=boxBottom, bgcolor=bgBoxColor, border_color=na)
+    
+    line lineUpper = na
+    line lineLower = na
+
     if showRefLines
-        line.new(x1=boxLeft, y1=high, x2=bar_index, y2=high, color=upperRefLineColor, style=refLineStyle, width=refLineWidth, extend=extend.right)
-        line.new(x1=boxLeft, y1=sequenceStartLow, x2=bar_index, y2=sequenceStartLow, color=lowerRefLineColor, style=refLineStyle, width=refLineWidth, extend=extend.right)
+        lineUpper := line.new(x1=boxLeft, y1=high, x2=bar_index, y2=high, color=upperRefLineColor, style=refLineStyle, width=refLineWidth, extend=extend.right)
+        lineLower := line.new(x1=boxLeft, y1=sequenceStartLow, x2=bar_index, y2=sequenceStartLow, color=lowerRefLineColor, style=refLineStyle, width=refLineWidth, extend=extend.right)
 
-// Keep track of the high and low of the most recently triggered signal to plot on the price scale
-var float lastSignalHigh = na
-var float lastSignalLow = na
+    newTrade = V20Trade.new(newBox, newLabel, lineUpper, lineLower, high, sequenceStartLow, 0, bar_index)
+    array.push(v20Trades, newTrade)
 
-if longCondition
-    lastSignalHigh := high
-    lastSignalLow := sequenceStartLow
+// Evaluate range completion logic (Price touches lower exactly or below, then upper exactly or above)
+if array.size(v20Trades) > 0
+    for i = array.size(v20Trades) - 1 to 0
+        trade = array.get(v20Trades, i)
+        
+        // Ensure we don't complete on the very candle that triggered it
+        if bar_index > trade.startBar
+            touchedLowerNow = low <= trade.tradeLow
+            touchedUpperNow = high >= trade.tradeHigh
+            
+            if trade.state == 0
+                if touchedLowerNow
+                    trade.state := 1
+                    // Prevent same-bar immediate completion on red candles that hit high first then drop.
+                    if touchedUpperNow and close >= open
+                        trade.state := 2
+            else if trade.state == 1
+                if touchedUpperNow
+                    trade.state := 2
+            
+        if trade.state == 2 and hideCompletedV20
+            // Trade complete: remove all indicators
+            box.delete(trade.bgBox)
+            label.delete(trade.pctLabel)
+            if not na(trade.upperLine)
+                line.delete(trade.upperLine)
+            if not na(trade.lowerLine)
+                line.delete(trade.lowerLine)
+            array.remove(v20Trades, i)
 
 // Use plot with trackprice=true to natively pin the latest values onto the right-hand price scale exactly like native indicator lines
-plot(showV20 ? lastSignalHigh : na, title="Sequence High", color=showRefLines ? upperRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
-plot(showV20 ? lastSignalLow : na, title="Sequence Low", color=showRefLines ? lowerRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
+// Plot the most recent active trade's bounds
+float currentScaleHigh = na
+float currentScaleLow = na
+if array.size(v20Trades) > 0
+    lastActive = array.get(v20Trades, array.size(v20Trades) - 1)
+    currentScaleHigh := lastActive.tradeHigh
+    currentScaleLow := lastActive.tradeLow
+
+plot(showV20 ? currentScaleHigh : na, title="Sequence High", color=showRefLines ? upperRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
+plot(showV20 ? currentScaleLow : na, title="Sequence Low", color=showRefLines ? lowerRefLineColor : na, trackprice=true, show_last=1, display=display.price_scale)
 
 // --- SMA Strategy Logic & Plotting ---
 sma20 = ta.sma(close, 20)
