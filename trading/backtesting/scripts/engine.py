@@ -18,6 +18,8 @@ class Trade:
     status: str  # "COMPLETED", "OPEN", "PENDING"
     max_drawdown_pct: float  # Maximum paper loss during the trade (MAE)
     initial_move_pct: float
+    shares: float = 0.0
+    pnl_cash: float = 0.0
 
 class BacktestEngine:
     """Runs trading simulations and calculates performance metrics."""
@@ -94,11 +96,14 @@ class BacktestEngine:
                     # Filled on the last available day, so it remains open
                     last_close = df.iloc[-1]['Close']
                     pnl_pct = ((last_close - entry_price_with_fee) / entry_price_with_fee) * 100
+                    nominal_size = 100000.0
                     all_trades.append(Trade(
                         ticker=ticker, setup_date=setup_date, trigger_date=trigger_date,
                         fill_date=fill_date, exit_date=None, entry_price=entry_price, exit_price=last_close,
                         pnl_pct=pnl_pct, holding_days=0, status="OPEN", max_drawdown_pct=0.0,
-                        initial_move_pct=initial_move
+                        initial_move_pct=initial_move,
+                        shares=nominal_size / entry_price,
+                        pnl_cash=nominal_size * (pnl_pct / 100.0)
                     ))
                     continue
                     
@@ -131,11 +136,14 @@ class BacktestEngine:
                     lowest_low_during_trade = trade_period_df['Low'].min()
                     max_drawdown_pct = ((lowest_low_during_trade - entry_price) / entry_price) * 100
                     
+                nominal_size = 100000.0
                 trade_obj = Trade(
                     ticker=ticker, setup_date=setup_date, trigger_date=trigger_date,
                     fill_date=fill_date, exit_date=exit_date, entry_price=entry_price, exit_price=exit_price,
                     pnl_pct=pnl_pct, holding_days=holding_days, status=status,
-                    max_drawdown_pct=max_drawdown_pct, initial_move_pct=initial_move
+                    max_drawdown_pct=max_drawdown_pct, initial_move_pct=initial_move,
+                    shares=nominal_size / entry_price,
+                    pnl_cash=nominal_size * (pnl_pct / 100.0)
                 )
                 
                 all_trades.append(trade_obj)
@@ -224,7 +232,9 @@ class BacktestEngine:
                             fill_date=pos['fill_date'], exit_date=date, entry_price=pos['entry_price'],
                             exit_price=exit_price, pnl_pct=((exit_price * (1 - self.commission) - pos['entry_price'] * (1 + self.commission)) / (pos['entry_price'] * (1 + self.commission))) * 100,
                             holding_days=holding_days, status="COMPLETED", max_drawdown_pct=max_drawdown,
-                            initial_move_pct=pos['initial_move_pct']
+                            initial_move_pct=pos['initial_move_pct'],
+                            shares=pos['shares'],
+                            pnl_cash=exit_val - (pos['shares'] * pos['entry_price'] * (1 + self.commission))
                         )
                         completed_trades.append(trade_obj)
                     else:
@@ -316,12 +326,16 @@ class BacktestEngine:
             lowest_low = trade_period_df['Low'].min()
             max_drawdown = ((lowest_low - pos['entry_price']) / pos['entry_price']) * 100
             
+            entry_val = pos['shares'] * pos['entry_price'] * (1 + self.commission)
+            current_val = pos['shares'] * last_close
             trade_obj = Trade(
                 ticker=ticker, setup_date=pos['setup_date'], trigger_date=pos['trigger_date'],
                 fill_date=pos['fill_date'], exit_date=None, entry_price=pos['entry_price'],
                 exit_price=last_close, pnl_pct=((last_close - pos['entry_price'] * (1 + self.commission)) / (pos['entry_price'] * (1 + self.commission))) * 100,
                 holding_days=holding_days, status="OPEN", max_drawdown_pct=max_drawdown,
-                initial_move_pct=pos['initial_move_pct']
+                initial_move_pct=pos['initial_move_pct'],
+                shares=pos['shares'],
+                pnl_cash=current_val - entry_val
             )
             completed_trades.append(trade_obj)
             
@@ -330,7 +344,9 @@ class BacktestEngine:
                 ticker=order['ticker'], setup_date=order['setup_date'], trigger_date=order['trigger_date'],
                 fill_date=None, exit_date=None, entry_price=order['entry_limit'], exit_price=None,
                 pnl_pct=0.0, holding_days=0, status="PENDING", max_drawdown_pct=0.0,
-                initial_move_pct=order['initial_move_pct']
+                initial_move_pct=order['initial_move_pct'],
+                shares=0.0,
+                pnl_cash=0.0
             )
             completed_trades.append(trade_obj)
             

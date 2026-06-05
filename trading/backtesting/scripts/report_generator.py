@@ -57,7 +57,9 @@ class HTMLReportGenerator:
                 'holding_days': int(t.holding_days),
                 'status': t.status,
                 'max_drawdown_pct': float(t.max_drawdown_pct),
-                'initial_move_pct': float(t.initial_move_pct)
+                'initial_move_pct': float(t.initial_move_pct),
+                'shares': float(getattr(t, 'shares', 0.0)),
+                'pnl_cash': float(getattr(t, 'pnl_cash', 0.0))
             })
             
         # 2. Format Daily Price Data for Candlesticks
@@ -275,34 +277,94 @@ class HTMLReportGenerator:
                 </div>
             </div>
 
-            <!-- Individual Mode Charts -->
-            <div id="individual-charts-container" class="grid grid-cols-1 md:grid-cols-2 gap-6 hidden">
-                <div class="card p-4 rounded-xl shadow-lg flex flex-col justify-between">
-                    <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase">Trade Returns Distribution</h3>
-                    <div id="plotly-distribution" class="w-full" style="height: 300px;"></div>
+            <!-- Stats & Performance Summary Row -->
+            <div id="stats-performance-container" class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+                <!-- Card 1: V20 Performance Summary Table -->
+                <div class="card p-5 rounded-xl shadow-lg flex flex-col justify-between">
+                    <h3 class="text-sm font-bold text-gray-400 mb-4 uppercase">V20 Strategy Performance</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left border-collapse">
+                            <thead>
+                                <tr class="border-b border-gray-800 text-xs uppercase text-gray-400 font-semibold">
+                                    <th class="py-2 pr-4 font-bold text-gray-400 text-left">V20 Performance</th>
+                                    <th class="py-2 px-4 font-bold text-right text-gray-300">All Time</th>
+                                    <th class="py-2 pl-4 font-bold text-right text-blue-400">1 Year Ago</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-800 font-medium">
+                                <tr class="hover:bg-gray-800/30">
+                                    <td class="py-2.5 pr-4 text-gray-400">Total Trades</td>
+                                    <td id="perf-all-total" class="py-2.5 px-4 text-right text-white font-bold">-</td>
+                                    <td id="perf-1y-total" class="py-2.5 pl-4 text-right text-white font-bold">-</td>
+                                </tr>
+                                <tr class="hover:bg-gray-800/30">
+                                    <td class="py-2.5 pr-4 text-gray-400">Successful Trades</td>
+                                    <td id="perf-all-success" class="py-2.5 px-4 text-right text-green-400 font-bold">-</td>
+                                    <td id="perf-1y-success" class="py-2.5 pl-4 text-right text-green-400 font-bold">-</td>
+                                </tr>
+                                <tr class="hover:bg-gray-800/30">
+                                    <td class="py-2.5 pr-4 text-gray-400">Success Rate</td>
+                                    <td id="perf-all-rate" class="py-2.5 px-4 text-right text-green-400 font-bold">-</td>
+                                    <td id="perf-1y-rate" class="py-2.5 pl-4 text-right text-green-400 font-bold">-</td>
+                                </tr>
+                                <tr class="hover:bg-gray-800/30">
+                                    <td class="py-2.5 pr-4 text-gray-400">Avg Return</td>
+                                    <td id="perf-all-avg" class="py-2.5 px-4 text-right text-yellow-400 font-bold">-</td>
+                                    <td id="perf-1y-avg" class="py-2.5 pl-4 text-right text-yellow-400 font-bold">-</td>
+                                </tr>
+                                <tr class="hover:bg-gray-800/30">
+                                    <td class="py-2.5 pr-4 text-gray-400">Best Return</td>
+                                    <td id="perf-all-best" class="py-2.5 px-4 text-right text-green-400 font-bold">-</td>
+                                    <td id="perf-1y-best" class="py-2.5 pl-4 text-right text-green-400 font-bold">-</td>
+                                </tr>
+                                <tr class="hover:bg-gray-800/30">
+                                    <td class="py-2.5 pr-4 text-gray-400">Avg Recovery</td>
+                                    <td id="perf-all-recovery" class="py-2.5 px-4 text-right text-yellow-400 font-bold">-</td>
+                                    <td id="perf-1y-recovery" class="py-2.5 pl-4 text-right text-yellow-400 font-bold">-</td>
+                                </tr>
+                                <tr class="hover:bg-gray-800/30">
+                                    <td class="py-2.5 pr-4 text-gray-400">Max Exposure</td>
+                                    <td id="perf-all-exposure" class="py-2.5 px-4 text-right text-red-400 font-bold">-</td>
+                                    <td id="perf-1y-exposure" class="py-2.5 pl-4 text-right text-red-400 font-bold">-</td>
+                                </tr>
+                                <tr class="hover:bg-gray-800/30">
+                                    <td class="py-2.5 pr-4 text-gray-400">Total Profit</td>
+                                    <td id="perf-all-profit" class="py-2.5 px-4 text-right text-green-400 font-bold">-</td>
+                                    <td id="perf-1y-profit" class="py-2.5 pl-4 text-right text-green-400 font-bold">-</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-                <div class="card p-4 rounded-xl shadow-lg flex flex-col justify-between">
-                    <h3 class="text-sm font-bold text-gray-400 mb-4 uppercase">Key Statistics Summary</h3>
-                    <div class="space-y-4 text-sm">
-                        <div class="flex justify-between border-b border-gray-800 pb-2">
-                            <span class="text-gray-400">Total Stocks Loaded</span>
-                            <span id="stat-stocks" class="font-bold text-white">-</span>
-                        </div>
-                        <div class="flex justify-between border-b border-gray-800 pb-2">
-                            <span class="text-gray-400">Completed (Closed) Trades</span>
-                            <span id="stat-completed" class="font-bold text-white">-</span>
-                        </div>
-                        <div class="flex justify-between border-b border-gray-800 pb-2">
-                            <span class="text-gray-400">Active (Open) Positions</span>
-                            <span id="stat-active" class="font-bold text-white">-</span>
-                        </div>
-                        <div class="flex justify-between border-b border-gray-800 pb-2">
-                            <span class="text-gray-400">Average Holding Period</span>
-                            <span id="stat-holding" class="font-bold text-white">-</span>
-                        </div>
-                        <div class="flex justify-between pb-2">
-                            <span class="text-gray-400">Strategy Profit Factor</span>
-                            <span id="stat-pf" class="font-bold text-green-400">-</span>
+                <!-- Card 2: Right Card showing returns distribution or stats summary -->
+                <div class="card p-5 rounded-xl shadow-lg flex flex-col justify-between">
+                    <div id="right-card-distribution-content" class="w-full h-full flex flex-col justify-between">
+                        <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase">Trade Returns Distribution</h3>
+                        <div id="plotly-distribution" class="w-full" style="height: 280px;"></div>
+                    </div>
+                    <div id="right-card-stats-content" class="w-full h-full flex flex-col justify-between hidden">
+                        <h3 class="text-sm font-bold text-gray-400 mb-4 uppercase">Portfolio Key Stats Summary</h3>
+                        <div class="space-y-4 text-sm">
+                            <div class="flex justify-between border-b border-gray-800 pb-2">
+                                <span class="text-gray-400">Total Stocks Loaded</span>
+                                <span id="stat-stocks" class="font-bold text-white">-</span>
+                            </div>
+                            <div class="flex justify-between border-b border-gray-800 pb-2">
+                                <span class="text-gray-400">Completed (Closed) Trades</span>
+                                <span id="stat-completed" class="font-bold text-white">-</span>
+                            </div>
+                            <div class="flex justify-between border-b border-gray-800 pb-2">
+                                <span class="text-gray-400">Active (Open) Positions</span>
+                                <span id="stat-active" class="font-bold text-white">-</span>
+                            </div>
+                            <div class="flex justify-between border-b border-gray-800 pb-2">
+                                <span class="text-gray-400">Average Holding Period</span>
+                                <span id="stat-holding" class="font-bold text-white">-</span>
+                            </div>
+                            <div class="flex justify-between pb-2">
+                                <span class="text-gray-400">Strategy Profit Factor</span>
+                                <span id="stat-pf" class="font-bold text-green-400">-</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -447,10 +509,37 @@ class HTMLReportGenerator:
                 selector.appendChild(opt);
             }});
 
+            // Common stats calculations (used in portfolio stats panel)
+            const ovr = reportData.trades;
+            const filled = ovr.filter(t => t.status !== 'PENDING');
+            const completed = ovr.filter(t => t.status === 'COMPLETED');
+            
+            document.getElementById('stat-stocks').innerText = reportData.tickers_list.length;
+            document.getElementById('stat-completed').innerText = completed.length;
+            document.getElementById('stat-active').innerText = ovr.filter(t => t.status === 'OPEN').length;
+            
+            let totalHold = 0;
+            filled.forEach(t => totalHold += t.holding_days);
+            const avgHold = filled.length > 0 ? (totalHold / filled.length) : 0;
+            document.getElementById('stat-holding').innerText = avgHold.toFixed(1) + ' Days';
+            
+            let profits = 0;
+            let losses = 0;
+            completed.forEach(t => {{
+                if (t.pnl_pct > 0) profits += t.pnl_pct;
+                else losses += Math.abs(t.pnl_pct);
+            }});
+            const pf = losses === 0 ? (profits > 0 ? 'Infinity' : '1.00') : (profits / losses).toFixed(2);
+            document.getElementById('stat-pf').innerText = pf;
+
             // Conditional layout setup based on mode
             if (reportData.mode === 'portfolio') {{
                 document.getElementById('portfolio-kpi-row').classList.remove('hidden');
                 document.getElementById('portfolio-charts-container').classList.remove('hidden');
+                
+                // Show right stats panel and hide returns distribution histogram
+                document.getElementById('right-card-stats-content').classList.remove('hidden');
+                document.getElementById('right-card-distribution-content').classList.add('hidden');
                 
                 // Set Portfolio KPIs
                 const sum = reportData.portfolio_summary;
@@ -469,13 +558,12 @@ class HTMLReportGenerator:
                 plotPortfolioDrawdown();
             }} else {{
                 document.getElementById('individual-kpi-row').classList.remove('hidden');
-                document.getElementById('individual-charts-container').classList.remove('hidden');
+                
+                // Show returns distribution histogram and hide right stats panel
+                document.getElementById('right-card-distribution-content').classList.remove('hidden');
+                document.getElementById('right-card-stats-content').classList.add('hidden');
                 
                 // Set Individual KPIs
-                const sum = reportData.portfolio_summary; // overall summary maps here
-                const ovr = reportData.trades;
-                const filled = ovr.filter(t => t.status !== 'PENDING');
-                const completed = ovr.filter(t => t.status === 'COMPLETED');
                 const winrate = completed.length > 0 ? (completed.filter(t => t.pnl_pct > 0).length / completed.length * 100) : 0;
                 
                 // Overall calc
@@ -492,29 +580,12 @@ class HTMLReportGenerator:
                 document.getElementById('kpi-avgret').innerText = avgPnL.toFixed(2) + '%';
                 document.getElementById('kpi-maxmae').innerText = minMAE.toFixed(2) + '%';
 
-                // Set statistics panel
-                document.getElementById('stat-stocks').innerText = reportData.tickers_list.length;
-                document.getElementById('stat-completed').innerText = completed.length;
-                document.getElementById('stat-active').innerText = ovr.filter(t => t.status === 'OPEN').length;
-                
-                let totalHold = 0;
-                filled.forEach(t => totalHold += t.holding_days);
-                const avgHold = filled.length > 0 ? (totalHold / filled.length) : 0;
-                document.getElementById('stat-holding').innerText = avgHold.toFixed(1) + ' Days';
-                
-                // Profit factor
-                let profits = 0;
-                let losses = 0;
-                completed.forEach(t => {{
-                    if (t.pnl_pct > 0) profits += t.pnl_pct;
-                    else losses += Math.abs(t.pnl_pct);
-                }});
-                const pf = losses === 0 ? (profits > 0 ? 'Infinity' : '1.00') : (profits / losses).toFixed(2);
-                document.getElementById('stat-pf').innerText = pf;
-
                 // Plot returns distribution histogram
                 plotReturnsDistribution();
             }}
+
+            // Populate V20 Strategy Performance Table
+            populateV20PerformanceTable();
 
             // Render tables & default stock chart
             renderTickersTable();
@@ -523,6 +594,137 @@ class HTMLReportGenerator:
                 renderCandlestick(reportData.tickers_list[0]);
             }}
         }};
+
+        // ----------------------------------------------------
+        // V20 PERFORMANCE TABLE CALCULATION
+        // ----------------------------------------------------
+        function populateV20PerformanceTable() {{
+            const trades = reportData.trades;
+            const filled = trades.filter(t => t.status !== 'PENDING');
+            
+            // Define 1 year ago boundary
+            let maxDate = new Date();
+            const fillDates = filled.map(t => new Date(t.fill_date)).filter(d => !isNaN(d));
+            if (fillDates.length > 0) {{
+                maxDate = new Date(Math.max(...fillDates));
+            }}
+            const oneYearAgoDate = new Date(maxDate);
+            oneYearAgoDate.setFullYear(oneYearAgoDate.getFullYear() - 1);
+            
+            const filled1y = filled.filter(t => new Date(t.fill_date) >= oneYearAgoDate);
+            
+            // Helper to compute stats
+            const calcStats = (list) => {{
+                const total = list.length;
+                const completed = list.filter(t => t.status === 'COMPLETED');
+                const success = completed.filter(t => t.pnl_pct > 0).length;
+                const rate = completed.length > 0 ? (success / completed.length * 100) : 0;
+                
+                let sumRet = 0;
+                let bestRet = 0;
+                let sumHold = 0;
+                list.forEach(t => {{
+                    sumRet += t.pnl_pct;
+                    if (t.pnl_pct > bestRet) bestRet = t.pnl_pct;
+                }});
+                completed.forEach(t => {{
+                    sumHold += t.holding_days;
+                }});
+                
+                const avgRet = total > 0 ? (sumRet / total) : 0;
+                const avgRecovery = completed.length > 0 ? (sumHold / completed.length) : 0;
+                
+                // exposure and cash profit
+                let maxExposure = 0;
+                let totalProfit = 0;
+                
+                if (reportData.mode === 'portfolio') {{
+                    // Portfolio mode: sum of pnl_cash
+                    list.forEach(t => {{
+                        totalProfit += t.pnl_cash || 0;
+                    }});
+                    
+                    // Daily exposure calculation
+                    const dailyExposures = reportData.equity_curve.map(e => {{
+                        const dStr = e.date;
+                        let exp = 0;
+                        list.forEach(t => {{
+                            if (t.fill_date && t.fill_date <= dStr) {{
+                                if (!t.exit_date || dStr < t.exit_date) {{
+                                    exp += (t.shares || 0) * t.entry_price;
+                                }}
+                            }}
+                        }});
+                        return exp;
+                    }});
+                    if (dailyExposures.length > 0) {{
+                        maxExposure = Math.max(...dailyExposures);
+                    }}
+                }} else {{
+                    // Individual mode: nominal ₹100,000 per trade
+                    list.forEach(t => {{
+                        totalProfit += t.pnl_cash || 0;
+                    }});
+                    
+                    // Max exposure in individual mode: max concurrent active positions * 100,000
+                    const dates = [];
+                    list.forEach(t => {{
+                        if (t.fill_date) {{
+                            dates.push({{date: t.fill_date, type: 1}});
+                        }}
+                        if (t.exit_date) {{
+                            dates.push({{date: t.exit_date, type: -1}});
+                        }}
+                    }});
+                    dates.sort((a,b) => a.date.localeCompare(b.date));
+                    let current = 0;
+                    let maxConcurrent = 0;
+                    dates.forEach(item => {{
+                        current += item.type;
+                        if (current > maxConcurrent) maxConcurrent = current;
+                    }});
+                    maxExposure = maxConcurrent * 100000.0;
+                }}
+                
+                return {{ total, success, rate, avgRet, bestRet, avgRecovery, maxExposure, totalProfit }};
+            }};
+            
+            const statsAll = calcStats(filled);
+            const stats1y = calcStats(filled1y);
+            
+            // Update Table elements
+            document.getElementById('perf-all-total').innerText = statsAll.total;
+            document.getElementById('perf-1y-total').innerText = stats1y.total;
+            
+            document.getElementById('perf-all-success').innerText = statsAll.success;
+            document.getElementById('perf-1y-success').innerText = stats1y.success;
+            
+            document.getElementById('perf-all-rate').innerText = statsAll.rate.toFixed(1) + '%';
+            document.getElementById('perf-1y-rate').innerText = stats1y.rate.toFixed(1) + '%';
+            
+            document.getElementById('perf-all-avg').innerText = statsAll.avgRet.toFixed(2) + '%';
+            document.getElementById('perf-1y-avg').innerText = stats1y.avgRet.toFixed(2) + '%';
+            
+            document.getElementById('perf-all-best').innerText = statsAll.bestRet.toFixed(2) + '%';
+            document.getElementById('perf-1y-best').innerText = stats1y.bestRet.toFixed(2) + '%';
+            
+            document.getElementById('perf-all-recovery').innerText = Math.round(statsAll.avgRecovery) + ' Days';
+            document.getElementById('perf-1y-recovery').innerText = Math.round(stats1y.avgRecovery) + ' Days';
+            
+            document.getElementById('perf-all-exposure').innerText = '₹' + Math.round(statsAll.maxExposure).toLocaleString('en-IN');
+            document.getElementById('perf-1y-exposure').innerText = '₹' + Math.round(stats1y.maxExposure).toLocaleString('en-IN');
+            
+            const pAll = document.getElementById('perf-all-profit');
+            const p1y = document.getElementById('perf-1y-profit');
+            pAll.innerText = '₹' + Math.round(statsAll.totalProfit).toLocaleString('en-IN');
+            p1y.innerText = '₹' + Math.round(stats1y.totalProfit).toLocaleString('en-IN');
+            
+            if (statsAll.totalProfit < 0) pAll.className = 'py-2.5 px-4 text-right text-red-400 font-bold';
+            else pAll.className = 'py-2.5 px-4 text-right text-green-400 font-bold';
+            
+            if (stats1y.totalProfit < 0) p1y.className = 'py-2.5 pl-4 text-right text-red-400 font-bold';
+            else p1y.className = 'py-2.5 pl-4 text-right text-green-400 font-bold';
+        }}
 
         // ----------------------------------------------------
         // TABS SWITCHING

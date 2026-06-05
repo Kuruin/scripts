@@ -1,9 +1,6 @@
 import os
 import argparse
-import pandas as pd
-from datetime import datetime
 from config import (
-    DEFAULT_TICKERS,
     DEFAULT_START_DATE,
     DEFAULT_END_DATE,
     DEFAULT_INITIAL_CAPITAL,
@@ -11,7 +8,7 @@ from config import (
     DEFAULT_V20_MIN_PCT_MOVE,
     RESULTS_DIR
 )
-from data_loader import get_stock_data
+from data_loader import get_stock_data, download_batch_data
 from strategies import V20Strategy
 from engine import BacktestEngine
 from report_generator import HTMLReportGenerator
@@ -65,15 +62,17 @@ def main():
     
     # 1. Determine which tickers to use
     raw_tickers = []
+    file_suffix = "custom"
     if args.tickers:
         raw_tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     elif os.path.exists(args.file):
         raw_tickers = load_tickers_from_file(args.file)
         print(f"Loaded {len(raw_tickers)} tickers from file: {args.file}")
-    
+        file_suffix = os.path.splitext(os.path.basename(args.file))[0].lower()
+
     if not raw_tickers:
-        raw_tickers = DEFAULT_TICKERS
-        print(f"Using default ticker list ({len(raw_tickers)} tickers).")
+        print("Error: No tickers provided. Use --file stocks/v40.txt or --tickers TICKER1,TICKER2")
+        return
         
     # Resolve ticker suffixes (append .NS if missing)
     tickers = []
@@ -86,9 +85,14 @@ def main():
             
     # 2. Fetch data
     print_header(f"LOADING STOCK DATA ({args.start} to {args.end})")
+    try:
+        download_batch_data(tickers, args.start, args.end, force_download=args.force_download)
+    except Exception as e:
+        print(f"Warning: Batch download failed: {e}. Falling back to individual downloads.")
+        
     data_dict = {}
     for ticker in tickers:
-        df = get_stock_data(ticker, args.start, args.end, force_download=args.force_download)
+        df = get_stock_data(ticker, args.start, args.end)
         if not df.empty:
             data_dict[ticker] = df
             
@@ -127,48 +131,7 @@ def main():
         print(f"{'Max Adverse Excursion (Max Drawdown)':<35} | {overall['max_mae_pct']:>9.2f} %")
         print_separator()
         
-        # Save Trades CSV
-        trades_list = []
-        for t in trades:
-            trades_list.append({
-                'Ticker': t.ticker,
-                'SetupDate': t.setup_date.strftime("%Y-%m-%d") if t.setup_date else "",
-                'TriggerDate': t.trigger_date.strftime("%Y-%m-%d") if t.trigger_date else "",
-                'FillDate': t.fill_date.strftime("%Y-%m-%d") if t.fill_date else "N/A",
-                'ExitDate': t.exit_date.strftime("%Y-%m-%d") if t.exit_date else "N/A",
-                'EntryPrice': t.entry_price,
-                'ExitPrice': t.exit_price if t.exit_price else "N/A",
-                'PnL_%': round(t.pnl_pct, 2),
-                'HoldingDays': t.holding_days,
-                'Status': t.status,
-                'MaxPaperLoss_%': round(t.max_drawdown_pct, 2),
-                'InitialMove_%': round(t.initial_move_pct, 2)
-            })
-        trades_df = pd.DataFrame(trades_list)
-        trades_path = os.path.join(RESULTS_DIR, "results_trades_individual.csv")
-        trades_df.to_csv(trades_path, index=False)
-        print(f"Saved trade list to: {trades_path}")
-        
-        # Save Ticker Summary CSV
-        summary_list = []
-        for tick, s in ticker_summary.items():
-            summary_list.append({
-                'Ticker': tick,
-                'TotalTrades': s['total_trades'],
-                'FilledTrades': s['filled_trades'],
-                'CompletedTrades': s['completed_trades'],
-                'OpenTrades': s['open_trades'],
-                'PendingTrades': s['pending_trades'],
-                'WinRate_%': round(s['win_rate_pct'], 2),
-                'AvgReturn_%': round(s['avg_return_pct'], 2),
-                'AvgHoldingDays': round(s['avg_holding_days'], 1),
-                'ProfitFactor': round(s['profit_factor'], 2),
-                'MaxMAE_%': round(s['max_mae_pct'], 2)
-            })
-        summary_df = pd.DataFrame(summary_list)
-        summary_path = os.path.join(RESULTS_DIR, "results_tickers_individual.csv")
-        summary_df.to_csv(summary_path, index=False)
-        print(f"Saved stock-by-stock summary to: {summary_path}")
+
 
     elif args.mode == "portfolio":
         print_header(f"RUNNING PORTFOLIO SIMULATION (CAPITAL: {args.capital:,.2f})")
@@ -206,39 +169,11 @@ def main():
         print(f"{'Trade Profit Factor':<35} | {trade_stats['profit_factor']:>13.2f}")
         print_separator()
         
-        # Save Trades CSV
-        trades_list = []
-        for t in trades:
-            trades_list.append({
-                'Ticker': t.ticker,
-                'SetupDate': t.setup_date.strftime("%Y-%m-%d") if t.setup_date else "",
-                'TriggerDate': t.trigger_date.strftime("%Y-%m-%d") if t.trigger_date else "",
-                'FillDate': t.fill_date.strftime("%Y-%m-%d") if t.fill_date else "N/A",
-                'ExitDate': t.exit_date.strftime("%Y-%m-%d") if t.exit_date else "N/A",
-                'EntryPrice': t.entry_price,
-                'ExitPrice': t.exit_price if t.exit_price else "N/A",
-                'PnL_%': round(t.pnl_pct, 2),
-                'HoldingDays': t.holding_days,
-                'Status': t.status,
-                'MaxPaperLoss_%': round(t.max_drawdown_pct, 2)
-            })
-        trades_df = pd.DataFrame(trades_list)
-        trades_path = os.path.join(RESULTS_DIR, "results_trades_portfolio.csv")
-        trades_df.to_csv(trades_path, index=False)
-        print(f"Saved portfolio trade list to: {trades_path}")
-        
-        # Save Equity Curve CSV
-        equity_df = pd.DataFrame(equity).reset_index()
-        equity_df.columns = ['Date', 'Equity']
-        # Format Date column
-        equity_df['Date'] = equity_df['Date'].dt.strftime("%Y-%m-%d")
-        equity_path = os.path.join(RESULTS_DIR, "results_equity_curve.csv")
-        equity_df.to_csv(equity_path, index=False)
-        print(f"Saved daily equity curve to: {equity_path}")
+
 
     # 5. Generate Standalone HTML Report
     print_header("GENERATING HTML VISUAL DASHBOARD")
-    report_file = os.path.join(RESULTS_DIR, f"backtest_report_{args.mode}.html")
+    report_file = os.path.join(RESULTS_DIR, f"backtest_report_{file_suffix}.html")
     try:
         HTMLReportGenerator.generate(
             backtest_results=results,
