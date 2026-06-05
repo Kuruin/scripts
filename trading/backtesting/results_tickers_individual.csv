@@ -1,4 +1,0 @@
-Ticker,TotalTrades,FilledTrades,CompletedTrades,OpenTrades,PendingTrades,WinRate_%,AvgReturn_%,AvgHoldingDays,ProfitFactor,MaxMAE_%
-RELIANCE.NS,4,4,4,0,0,100.0,33.17,167.5,inf,-18.47
-TCS.NS,3,3,3,0,0,100.0,32.45,124.0,inf,-5.56
-INFY.NS,5,5,4,1,0,100.0,28.02,210.6,inf,-18.3

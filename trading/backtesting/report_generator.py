@@ -1,0 +1,896 @@
+import os
+import json
+import pandas as pd
+import numpy as np
+from datetime import datetime
+
+class HTMLReportGenerator:
+    """Generates a standalone, self-contained HTML/JS dashboard for backtesting results."""
+    
+    @staticmethod
+    def _convert_numpy(obj):
+        """Helper to convert numpy types for JSON serialization."""
+        if isinstance(obj, (np.int64, np.int32, np.integer)):
+            return int(obj)
+        elif isinstance(obj, (np.float64, np.float32, np.floating)):
+            return float(obj)
+        elif isinstance(obj, (datetime, pd.Timestamp)):
+            return obj.strftime("%Y-%m-%d")
+        elif isinstance(obj, pd.Series):
+            return obj.tolist()
+        elif isinstance(obj, pd.DataFrame):
+            return obj.to_dict(orient='records')
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+    @classmethod
+    def generate(
+        cls, 
+        backtest_results: dict, 
+        data_dict: dict, 
+        mode: str, 
+        min_move: float,
+        output_filename: str = "backtest_report.html"
+    ):
+        """
+        Generates the standalone HTML report.
+        
+        Args:
+            backtest_results: The dictionary returned by the backtesting engine.
+            data_dict: Dictionary of stock ticker -> pd.DataFrame containing OHLCV.
+            mode: "individual" or "portfolio"
+            min_move: V20 min percent move configuration
+            output_filename: Output path of the HTML file.
+        """
+        # 1. Format Trades for JSON
+        trades = backtest_results.get("trades", [])
+        trades_json_list = []
+        for t in trades:
+            trades_json_list.append({
+                'ticker': t.ticker,
+                'setup_date': t.setup_date.strftime("%Y-%m-%d") if t.setup_date else "",
+                'trigger_date': t.trigger_date.strftime("%Y-%m-%d") if t.trigger_date else "",
+                'fill_date': t.fill_date.strftime("%Y-%m-%d") if t.fill_date else None,
+                'exit_date': t.exit_date.strftime("%Y-%m-%d") if t.exit_date else None,
+                'entry_price': float(t.entry_price),
+                'exit_price': float(t.exit_price) if t.exit_price is not None else None,
+                'pnl_pct': float(t.pnl_pct),
+                'holding_days': int(t.holding_days),
+                'status': t.status,
+                'max_drawdown_pct': float(t.max_drawdown_pct),
+                'initial_move_pct': float(t.initial_move_pct)
+            })
+            
+        # 2. Format Daily Price Data for Candlesticks
+        # Convert daily dataframes to compact JSON format
+        prices_json_dict = {}
+        for ticker, df in data_dict.items():
+            if df.empty:
+                continue
+            records = []
+            for date, row in df.iterrows():
+                records.append({
+                    'date': date.strftime("%Y-%m-%d"),
+                    'o': float(row['Open']),
+                    'h': float(row['High']),
+                    'l': float(row['Low']),
+                    'c': float(row['Close'])
+                })
+            prices_json_dict[ticker] = records
+            
+        # 3. Format Summary Stats
+        if mode == "portfolio":
+            summary = backtest_results["summary"]
+            equity_curve = backtest_results["equity_curve"]
+            equity_json_list = [{"date": idx.strftime("%Y-%m-%d"), "val": float(val)} for idx, val in equity_curve.items()]
+            
+            # Drawdowns
+            rolling_max = equity_curve.cummax()
+            drawdown_curve = ((equity_curve - rolling_max) / rolling_max) * 100
+            dd_json_list = [{"date": idx.strftime("%Y-%m-%d"), "val": float(val)} for idx, val in drawdown_curve.items()]
+            
+            portfolio_summary = {
+                'initial_capital': float(summary['initial_capital']),
+                'final_equity': float(summary['final_equity']),
+                'total_return_pct': float(summary['total_return_pct']),
+                'annualized_return_pct': float(summary['annualized_return_pct']),
+                'annualized_volatility_pct': float(summary['annualized_volatility_pct']),
+                'sharpe_ratio': float(summary['sharpe_ratio']),
+                'max_drawdown_pct': float(summary['max_drawdown_pct']),
+                'total_trades': int(summary['trade_stats']['total_trades']),
+                'filled_trades': int(summary['trade_stats']['filled_trades']),
+                'completed_trades': int(summary['trade_stats']['completed_trades']),
+                'open_trades': int(summary['trade_stats']['open_trades']),
+                'pending_trades': int(summary['trade_stats']['pending_trades']),
+                'win_rate_pct': float(summary['trade_stats']['win_rate_pct']),
+                'avg_return_pct': float(summary['trade_stats']['avg_return_pct']),
+                'avg_holding_days': float(summary['trade_stats']['avg_holding_days']),
+                'profit_factor': float(summary['trade_stats']['profit_factor']) if summary['trade_stats']['profit_factor'] != np.inf else "Infinity"
+            }
+            tickers_summary = {}
+        else:
+            portfolio_summary = {}
+            equity_json_list = []
+            dd_json_list = []
+            
+            # Stock by stock aggregations
+            tickers_summary = {}
+            for ticker, s in backtest_results["ticker_summary"].items():
+                tickers_summary[ticker] = {
+                    'total_trades': int(s['total_trades']),
+                    'filled_trades': int(s['filled_trades']),
+                    'completed_trades': int(s['completed_trades']),
+                    'open_trades': int(s['open_trades']),
+                    'pending_trades': int(s['pending_trades']),
+                    'win_rate_pct': float(s['win_rate_pct']),
+                    'avg_return_pct': float(s['avg_return_pct']),
+                    'avg_holding_days': float(s['avg_holding_days']),
+                    'max_mae_pct': float(s['max_mae_pct']),
+                    'profit_factor': float(s['profit_factor']) if s['profit_factor'] != np.inf else "Infinity"
+                }
+
+        # 4. Serialize Everything
+        data = {
+            'mode': mode,
+            'min_move': min_move,
+            'trades': trades_json_list,
+            'prices': prices_json_dict,
+            'portfolio_summary': portfolio_summary,
+            'tickers_summary': tickers_summary,
+            'equity_curve': equity_json_list,
+            'drawdown_curve': dd_json_list,
+            'tickers_list': list(data_dict.keys()),
+            'generation_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        json_data_str = json.dumps(data, default=cls._convert_numpy)
+        
+        # 5. Build HTML content
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V20 Backtest Report - Standalone Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <style>
+        body {{
+            background-color: #0b0f19;
+            color: #f1f5f9;
+        }}
+        .card {{
+            background-color: #111827;
+            border: 1px solid #1f2937;
+        }}
+        .nav-tab.active {{
+            border-bottom: 2px solid #3b82f6;
+            color: #3b82f6;
+        }}
+        /* Customize scrollbars */
+        ::-webkit-scrollbar {{
+            width: 8px;
+            height: 8px;
+        }}
+        ::-webkit-scrollbar-track {{
+            background: #0b0f19;
+        }}
+        ::-webkit-scrollbar-thumb {{
+            background: #1f2937;
+            border-radius: 4px;
+        }}
+        ::-webkit-scrollbar-thumb:hover {{
+            background: #374151;
+        }}
+    </style>
+</head>
+<body class="min-h-screen flex flex-col font-sans">
+    <!-- Navbar -->
+    <header class="card border-b border-gray-800 px-6 py-4 flex items-center justify-between shadow-lg">
+        <div>
+            <h1 class="text-xl font-bold flex items-center gap-2 text-white">
+                📈 V20 Strategy Backtest Dashboard
+            </h1>
+            <p class="text-xs text-gray-400 mt-1">Generated: <span id="gen-time"></span> | Strategy: V20 (Volatility 20%)</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-blue-900/30 text-blue-400 border border-blue-800/40">
+                Mode: <span id="run-mode" class="capitalize"></span>
+            </span>
+            <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-green-900/30 text-green-400 border border-green-800/40">
+                Min Move: <span id="param-move"></span>%
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col gap-6">
+        <!-- Tabs bar -->
+        <nav class="flex border-b border-gray-800 gap-6 text-sm font-medium">
+            <button id="tab-btn-dashboard" class="nav-tab py-2 px-1 text-gray-400 hover:text-white transition active" onclick="switchTab('dashboard')">📊 Summary Dashboard</button>
+            <button id="tab-btn-charts" class="nav-tab py-2 px-1 text-gray-400 hover:text-white transition" onclick="switchTab('charts')">📈 Interactive Charts</button>
+            <button id="tab-btn-trades" class="nav-tab py-2 px-1 text-gray-400 hover:text-white transition" onclick="switchTab('trades')">💼 Detailed Trade Log</button>
+            <button id="tab-btn-tickers" class="nav-tab py-2 px-1 text-gray-400 hover:text-white transition" onclick="switchTab('tickers')">🗃️ Stock Performance</button>
+        </nav>
+
+        <!-- ============================================== -->
+        <!-- TAB 1: SUMMARY DASHBOARD -->
+        <!-- ============================================== -->
+        <div id="tab-dashboard" class="tab-content flex flex-col gap-6">
+            <!-- Row 1: KPI Stats Cards -->
+            <div id="portfolio-kpi-row" class="grid grid-cols-2 md:grid-cols-5 gap-4 hidden">
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Final Value</span>
+                    <span id="kpi-final" class="text-xl font-bold mt-2 text-white">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Total Return</span>
+                    <span id="kpi-return" class="text-xl font-bold mt-2 text-green-400">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">CAGR (Annualized)</span>
+                    <span id="kpi-cagr" class="text-xl font-bold mt-2 text-blue-400">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Sharpe Ratio</span>
+                    <span id="kpi-sharpe" class="text-xl font-bold mt-2 text-purple-400">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Max Drawdown</span>
+                    <span id="kpi-drawdown" class="text-xl font-bold mt-2 text-red-400">-</span>
+                </div>
+            </div>
+
+            <div id="individual-kpi-row" class="grid grid-cols-2 md:grid-cols-5 gap-4 hidden">
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Signals Triggered</span>
+                    <span id="kpi-signals" class="text-xl font-bold mt-2 text-white">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Filled Trades</span>
+                    <span id="kpi-filled" class="text-xl font-bold mt-2 text-blue-400">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Win Rate</span>
+                    <span id="kpi-winrate" class="text-xl font-bold mt-2 text-green-400">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Avg Return / Trade</span>
+                    <span id="kpi-avgret" class="text-xl font-bold mt-2 text-blue-400">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Max Trade Drawdown</span>
+                    <span id="kpi-maxmae" class="text-xl font-bold mt-2 text-red-400">-</span>
+                </div>
+            </div>
+
+            <!-- Row 2: Portfolio Charts -->
+            <div id="portfolio-charts-container" class="flex flex-col gap-6 hidden">
+                <div class="card p-4 rounded-xl shadow-lg">
+                    <div id="plotly-equity" class="w-full" style="height: 400px;"></div>
+                </div>
+                <div class="card p-4 rounded-xl shadow-lg">
+                    <div id="plotly-drawdown" class="w-full" style="height: 250px;"></div>
+                </div>
+            </div>
+
+            <!-- Individual Mode Charts -->
+            <div id="individual-charts-container" class="grid grid-cols-1 md:grid-cols-2 gap-6 hidden">
+                <div class="card p-4 rounded-xl shadow-lg flex flex-col justify-between">
+                    <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase">Trade Returns Distribution</h3>
+                    <div id="plotly-distribution" class="w-full" style="height: 300px;"></div>
+                </div>
+                <div class="card p-4 rounded-xl shadow-lg flex flex-col justify-between">
+                    <h3 class="text-sm font-bold text-gray-400 mb-4 uppercase">Key Statistics Summary</h3>
+                    <div class="space-y-4 text-sm">
+                        <div class="flex justify-between border-b border-gray-800 pb-2">
+                            <span class="text-gray-400">Total Stocks Loaded</span>
+                            <span id="stat-stocks" class="font-bold text-white">-</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-800 pb-2">
+                            <span class="text-gray-400">Completed (Closed) Trades</span>
+                            <span id="stat-completed" class="font-bold text-white">-</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-800 pb-2">
+                            <span class="text-gray-400">Active (Open) Positions</span>
+                            <span id="stat-active" class="font-bold text-white">-</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-800 pb-2">
+                            <span class="text-gray-400">Average Holding Period</span>
+                            <span id="stat-holding" class="font-bold text-white">-</span>
+                        </div>
+                        <div class="flex justify-between pb-2">
+                            <span class="text-gray-400">Strategy Profit Factor</span>
+                            <span id="stat-pf" class="font-bold text-green-400">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- TAB 2: INTERACTIVE CHARTS -->
+        <!-- ============================================== -->
+        <div id="tab-charts" class="tab-content flex flex-col gap-4 hidden">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div class="flex items-center gap-2">
+                    <label for="stock-select" class="text-sm font-medium text-gray-400">Select Stock:</label>
+                    <select id="stock-select" class="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="renderCandlestick(this.value)">
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+                <div id="zoom-controls" class="flex rounded-lg border border-gray-800 overflow-hidden text-xs">
+                    <button class="px-3 py-2 bg-gray-900 text-gray-400 hover:text-white" onclick="changeZoom('all')">All History</button>
+                    <button class="px-3 py-2 bg-gray-900 border-l border-gray-800 text-gray-400 hover:text-white" onclick="changeZoom('2y')">Last 2 Years</button>
+                    <button class="px-3 py-2 bg-gray-900 border-l border-gray-800 text-gray-400 hover:text-white" onclick="changeZoom('1y')">Last 1 Year</button>
+                    <button class="px-3 py-2 bg-gray-900 border-l border-gray-800 text-gray-400 hover:text-white" onclick="changeZoom('6m')">Last 6 Months</button>
+                </div>
+            </div>
+            
+            <div class="card p-4 rounded-xl shadow-lg">
+                <div id="plotly-candlestick" class="w-full" style="height: 500px;"></div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- TAB 3: DETAILED TRADE LOG -->
+        <!-- ============================================== -->
+        <div id="tab-trades" class="tab-content flex flex-col gap-4 hidden">
+            <!-- Filter Bar -->
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div class="flex flex-wrap items-center gap-3">
+                    <input type="text" id="trade-search" placeholder="Search by Stock..." class="bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-4 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500" oninput="filterTrades()">
+                    <select id="status-filter" class="bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="filterTrades()">
+                        <option value="ALL">All Statuses</option>
+                        <option value="COMPLETED">Completed Only</option>
+                        <option value="OPEN">Open Only</option>
+                        <option value="PENDING">Pending Only</option>
+                    </select>
+                </div>
+                <div class="text-xs text-gray-400">
+                    Showing <span id="trades-showing-count">0</span> / <span id="trades-total-count">0</span> trades
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="card rounded-xl overflow-hidden shadow-lg border border-gray-800">
+                <div class="overflow-x-auto max-h-[500px]">
+                    <table class="min-w-full text-left border-collapse text-sm">
+                        <thead class="bg-gray-900 sticky top-0 border-b border-gray-800 text-xs uppercase text-gray-400 font-semibold">
+                            <tr>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('ticker')">Ticker ⇅</th>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('trigger_date')">Trigger Date ⇅</th>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('fill_date')">Fill Date ⇅</th>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('exit_date')">Exit Date ⇅</th>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('entry_price')">Entry Price ⇅</th>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('exit_price')">Exit Price ⇅</th>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('pnl_pct')">PnL % ⇅</th>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('holding_days')">Duration ⇅</th>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('status')">Status ⇅</th>
+                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('max_drawdown_pct')">Max Drawdown ⇅</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-table-body" class="divide-y divide-gray-800">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- TAB 4: TICKERS PERFORMANCE -->
+        <!-- ============================================== -->
+        <div id="tab-tickers" class="tab-content flex flex-col gap-4 hidden">
+            <div class="card rounded-xl overflow-hidden shadow-lg border border-gray-800">
+                <div class="overflow-x-auto max-h-[500px]">
+                    <table class="min-w-full text-left border-collapse text-sm">
+                        <thead class="bg-gray-900 sticky top-0 border-b border-gray-800 text-xs uppercase text-gray-400 font-semibold">
+                            <tr>
+                                <th class="px-6 py-3">Ticker</th>
+                                <th class="px-6 py-3">Signals</th>
+                                <th class="px-6 py-3">Filled</th>
+                                <th class="px-6 py-3">Closed</th>
+                                <th class="px-6 py-3">Active</th>
+                                <th class="px-6 py-3">Win Rate</th>
+                                <th class="px-6 py-3">Avg Return</th>
+                                <th class="px-6 py-3">Avg Hold (Days)</th>
+                                <th class="px-6 py-3">Profit Factor</th>
+                                <th class="px-6 py-3">Max Paper Drawdown</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tickers-table-body" class="divide-y divide-gray-800">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="card border-t border-gray-800 py-4 text-center text-xs text-gray-500 shadow-md">
+        Designed for Premium Stock Trading Backtests | Fully Standalone Web Dashboard
+    </footer>
+
+    <!-- JSON DATA INJECTION -->
+    <script id="backtest-data" type="application/json">
+        {json_data_str}
+    </script>
+
+    <!-- Client-side Javascript Logic -->
+    <script>
+        // Load data from script block
+        const reportData = JSON.parse(document.getElementById('backtest-data').textContent);
+        
+        // Populate Header info
+        document.getElementById('gen-time').innerText = reportData.generation_time;
+        document.getElementById('run-mode').innerText = reportData.mode === 'portfolio' ? 'Portfolio Simulation' : 'Individual Stats';
+        document.getElementById('param-move').innerText = reportData.min_move;
+
+        // Current UI state variables
+        let currentZoom = 'all';
+        let sortedColumn = 'trigger_date';
+        let sortDirection = 'desc';
+        let currentTrades = [...reportData.trades];
+
+        // ----------------------------------------------------
+        // INITIALIZATION
+        // ----------------------------------------------------
+        window.onload = function() {{
+            // Populate stock dropdown selector
+            const selector = document.getElementById('stock-select');
+            reportData.tickers_list.forEach(ticker => {{
+                let opt = document.createElement('option');
+                opt.value = ticker;
+                opt.innerHTML = ticker;
+                selector.appendChild(opt);
+            }});
+
+            // Conditional layout setup based on mode
+            if (reportData.mode === 'portfolio') {{
+                document.getElementById('portfolio-kpi-row').classList.remove('hidden');
+                document.getElementById('portfolio-charts-container').classList.remove('hidden');
+                
+                // Set Portfolio KPIs
+                const sum = reportData.portfolio_summary;
+                document.getElementById('kpi-final').innerText = sum.final_equity.toLocaleString('en-US', {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+                
+                const retSpan = document.getElementById('kpi-return');
+                retSpan.innerText = sum.total_return_pct.toFixed(2) + '%';
+                if (sum.total_return_pct < 0) retSpan.className = 'text-xl font-bold mt-2 text-red-400';
+                
+                document.getElementById('kpi-cagr').innerText = sum.annualized_return_pct.toFixed(2) + '%';
+                document.getElementById('kpi-sharpe').innerText = sum.sharpe_ratio.toFixed(2);
+                document.getElementById('kpi-drawdown').innerText = sum.max_drawdown_pct.toFixed(2) + '%';
+
+                // Plot Portfolio Charts
+                plotPortfolioEquity();
+                plotPortfolioDrawdown();
+            }} else {{
+                document.getElementById('individual-kpi-row').classList.remove('hidden');
+                document.getElementById('individual-charts-container').classList.remove('hidden');
+                
+                // Set Individual KPIs
+                const sum = reportData.portfolio_summary; // overall summary maps here
+                const ovr = reportData.trades;
+                const filled = ovr.filter(t => t.status !== 'PENDING');
+                const completed = ovr.filter(t => t.status === 'COMPLETED');
+                const winrate = completed.length > 0 ? (completed.filter(t => t.pnl_pct > 0).length / completed.length * 100) : 0;
+                
+                // Overall calc
+                let totalPnL = 0;
+                filled.forEach(t => totalPnL += t.pnl_pct);
+                const avgPnL = filled.length > 0 ? (totalPnL / filled.length) : 0;
+                
+                let minMAE = 0;
+                filled.forEach(t => {{ if (t.max_drawdown_pct < minMAE) minMAE = t.max_drawdown_pct; }});
+
+                document.getElementById('kpi-signals').innerText = ovr.length;
+                document.getElementById('kpi-filled').innerText = filled.length;
+                document.getElementById('kpi-winrate').innerText = winrate.toFixed(1) + '%';
+                document.getElementById('kpi-avgret').innerText = avgPnL.toFixed(2) + '%';
+                document.getElementById('kpi-maxmae').innerText = minMAE.toFixed(2) + '%';
+
+                // Set statistics panel
+                document.getElementById('stat-stocks').innerText = reportData.tickers_list.length;
+                document.getElementById('stat-completed').innerText = completed.length;
+                document.getElementById('stat-active').innerText = ovr.filter(t => t.status === 'OPEN').length;
+                
+                let totalHold = 0;
+                filled.forEach(t => totalHold += t.holding_days);
+                const avgHold = filled.length > 0 ? (totalHold / filled.length) : 0;
+                document.getElementById('stat-holding').innerText = avgHold.toFixed(1) + ' Days';
+                
+                // Profit factor
+                let profits = 0;
+                let losses = 0;
+                completed.forEach(t => {{
+                    if (t.pnl_pct > 0) profits += t.pnl_pct;
+                    else losses += Math.abs(t.pnl_pct);
+                }});
+                const pf = losses === 0 ? (profits > 0 ? 'Infinity' : '1.00') : (profits / losses).toFixed(2);
+                document.getElementById('stat-pf').innerText = pf;
+
+                // Plot returns distribution histogram
+                plotReturnsDistribution();
+            }}
+
+            // Render tables & default stock chart
+            renderTickersTable();
+            renderTradesTable();
+            if (reportData.tickers_list.length > 0) {{
+                renderCandlestick(reportData.tickers_list[0]);
+            }}
+        }};
+
+        // ----------------------------------------------------
+        // TABS SWITCHING
+        // ----------------------------------------------------
+        function switchTab(tabId) {{
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById('tab-' + tabId).classList.remove('hidden');
+            document.getElementById('tab-btn-' + tabId).classList.add('active');
+
+            // Force plotly resize in active tab
+            if (tabId === 'dashboard') {{
+                if (reportData.mode === 'portfolio') {{
+                    Plotly.Plots.resize(document.getElementById('plotly-equity'));
+                    Plotly.Plots.resize(document.getElementById('plotly-drawdown'));
+                }} else {{
+                    Plotly.Plots.resize(document.getElementById('plotly-distribution'));
+                }}
+            }} else if (tabId === 'charts') {{
+                Plotly.Plots.resize(document.getElementById('plotly-candlestick'));
+            }}
+        }}
+
+        // ----------------------------------------------------
+        // PORTFOLIO PLOTLY CHARTS
+        // ----------------------------------------------------
+        function plotPortfolioEquity() {{
+            const dates = reportData.equity_curve.map(d => d.date);
+            const vals = reportData.equity_curve.map(d => d.val);
+
+            const trace = {{
+                x: dates,
+                y: vals,
+                type: 'scatter',
+                mode: 'lines',
+                line: {{ color: '#10b981', width: 2.5 }},
+                name: 'Portfolio Equity'
+            }};
+
+            const layout = {{
+                title: {{ text: 'Portfolio Growth Over Time', font: {{ color: '#ffffff', size: 16 }} }},
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: '#111827',
+                margin: {{ l: 50, r: 20, t: 50, b: 40 }},
+                font: {{ color: '#cbd5e1' }},
+                xaxis: {{ gridcolor: '#1f2937', linecolor: '#374151' }},
+                yaxis: {{ gridcolor: '#1f2937', linecolor: '#374151', tickformat: '$,.0f' }}
+            }};
+
+            Plotly.newPlot('plotly-equity', [trace], layout, {{responsive: true}});
+        }}
+
+        function plotPortfolioDrawdown() {{
+            const dates = reportData.drawdown_curve.map(d => d.date);
+            const vals = reportData.drawdown_curve.map(d => d.val);
+
+            const trace = {{
+                x: dates,
+                y: vals,
+                fill: 'tozeroy',
+                fillcolor: 'rgba(239, 68, 68, 0.15)',
+                type: 'scatter',
+                mode: 'lines',
+                line: {{ color: '#ef4444', width: 1.5 }},
+                name: 'Drawdown'
+            }};
+
+            const layout = {{
+                title: {{ text: 'Portfolio Peak-to-Trough Drawdown (%)', font: {{ color: '#ffffff', size: 14 }} }},
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: '#111827',
+                margin: {{ l: 50, r: 20, t: 40, b: 30 }},
+                font: {{ color: '#cbd5e1' }},
+                xaxis: {{ gridcolor: '#1f2937', linecolor: '#374151' }},
+                yaxis: {{ gridcolor: '#1f2937', linecolor: '#374151', ticksuffix: '%' }}
+            }};
+
+            Plotly.newPlot('plotly-drawdown', [trace], layout, {{responsive: true}});
+        }}
+
+        function plotReturnsDistribution() {{
+            const completed = reportData.trades.filter(t => t.status === 'COMPLETED');
+            const pnls = completed.map(t => t.pnl_pct);
+
+            const trace = {{
+                x: pnls,
+                type: 'histogram',
+                xbins: {{ size: 2.0 }},
+                marker: {{ color: '#3b82f6', line: {{ color: '#111827', width: 1 }} }},
+                name: 'Returns'
+            }};
+
+            const layout = {{
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: '#111827',
+                margin: {{ l: 40, r: 20, t: 20, b: 40 }},
+                font: {{ color: '#cbd5e1' }},
+                xaxis: {{ gridcolor: '#1f2937', title: 'PnL %' }},
+                yaxis: {{ gridcolor: '#1f2937', title: 'Trades Count' }}
+            }};
+
+            Plotly.newPlot('plotly-distribution', [trace], layout, {{responsive: true}});
+        }}
+
+        // ----------------------------------------------------
+        // CANDLESTICK CHART OVERLAY
+        // ----------------------------------------------------
+        function renderCandlestick(ticker) {{
+            const priceData = reportData.prices[ticker] || [];
+            if (priceData.length === 0) return;
+
+            // Date filtering
+            let filteredPrice = [...priceData];
+            const lastDateObj = new Date(priceData[priceData.length - 1].date);
+            
+            if (currentZoom === '2y') {{
+                const cutoff = new Date(lastDateObj);
+                cutoff.setFullYear(cutoff.getFullYear() - 2);
+                filteredPrice = priceData.filter(p => new Date(p.date) >= cutoff);
+            }} else if (currentZoom === '1y') {{
+                const cutoff = new Date(lastDateObj);
+                cutoff.setFullYear(cutoff.getFullYear() - 1);
+                filteredPrice = priceData.filter(p => new Date(p.date) >= cutoff);
+            }} else if (currentZoom === '6m') {{
+                const cutoff = new Date(lastDateObj);
+                cutoff.setMonth(cutoff.getMonth() - 6);
+                filteredPrice = priceData.filter(p => new Date(p.date) >= cutoff);
+            }}
+
+            const cutoffDateStr = filteredPrice[0].date;
+
+            const x = filteredPrice.map(d => d.date);
+            const open = filteredPrice.map(d => d.o);
+            const high = filteredPrice.map(d => d.h);
+            const low = filteredPrice.map(d => d.l);
+            const close = filteredPrice.map(d => d.c);
+
+            const candleTrace = {{
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: 'candlestick',
+                name: 'OHLC',
+                increasing: {{ line: {{ color: '#10b981' }} }},
+                decreasing: {{ line: {{ color: '#ef4444' }} }}
+            }};
+
+            const traces = [candleTrace];
+            
+            // Filter setups/trades for overlay
+            const tickerTrades = reportData.trades.filter(t => t.ticker === ticker);
+            
+            let addedBuyLegend = false;
+            let addedSellLegend = false;
+            let addedLevelLegend = false;
+
+            tickerTrades.forEach(trade => {{
+                // Skip if trigger was before plot range
+                if (trade.trigger_date < cutoffDateStr) return;
+
+                // Entry levels
+                const limitEnd = trade.fill_date ? trade.fill_date : priceData[priceData.length - 1].date;
+                const exitEnd = trade.exit_date ? trade.exit_date : priceData[priceData.length - 1].date;
+                
+                // Entry Line (Green dashed)
+                traces.push({{
+                    x: [trade.trigger_date, limitEnd],
+                    y: [trade.entry_price, trade.entry_price],
+                    mode: 'lines',
+                    line: {{ color: '#10B981', width: 1.5, dash: 'dash' }},
+                    name: 'Limit Buy Target',
+                    showlegend: !addedLevelLegend,
+                    hoverinfo: 'skip'
+                }});
+
+                // Exit Line (Red dashed)
+                const targetPrice = trade.status === 'COMPLETED' ? trade.exit_price : (trade.entry_price * (1 + reportData.min_move/100));
+                traces.push({{
+                    x: [trade.trigger_date, exitEnd],
+                    y: [targetPrice, targetPrice],
+                    mode: 'lines',
+                    line: {{ color: '#EF4444', width: 1.5, dash: 'dash' }},
+                    name: 'Sell Target',
+                    showlegend: !addedLevelLegend,
+                    hoverinfo: 'skip'
+                }});
+                
+                addedLevelLegend = true;
+
+                // Buy Entry Marker
+                if (trade.fill_date && trade.fill_date >= cutoffDateStr) {{
+                    traces.push({{
+                        x: [trade.fill_date],
+                        y: [trade.entry_price],
+                        mode: 'markers',
+                        marker: {{ symbol: 'triangle-up', color: '#10b981', size: 12, line: {{ color: 'white', width: 1 }} }},
+                        name: 'Buy Executed',
+                        showlegend: !addedBuyLegend,
+                        hovertext: `Buy Entry: ${{trade.entry_price.toFixed(2)}}`
+                    }});
+                    addedBuyLegend = true;
+                }}
+
+                // Sell Exit Marker
+                if (trade.exit_date && trade.exit_date >= cutoffDateStr) {{
+                    traces.push({{
+                        x: [trade.exit_date],
+                        y: [trade.exit_price],
+                        mode: 'markers',
+                        marker: {{ symbol: 'triangle-down', color: '#ef4444', size: 12, line: {{ color: 'white', width: 1 }} }},
+                        name: 'Sell Executed',
+                        showlegend: !addedSellLegend,
+                        hovertext: `Sell Target: ${{trade.exit_price.toFixed(2)}} (PnL: ${{trade.pnl_pct.toFixed(1)}}%)`
+                    }});
+                    addedSellLegend = true;
+                }}
+            }});
+
+            const layout = {{
+                title: {{ text: ticker + ' Candlestick & V20 Overlays', font: {{ color: '#ffffff', size: 16 }} }},
+                xaxis: {{ gridcolor: '#1f2937', linecolor: '#374151', rangeslider: {{ visible: false }} }},
+                yaxis: {{ gridcolor: '#1f2937', linecolor: '#374151' }},
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: '#111827',
+                margin: {{ l: 50, r: 20, t: 50, b: 40 }},
+                font: {{ color: '#cbd5e1' }},
+                legend: {{ orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 }}
+            }};
+
+            Plotly.newPlot('plotly-candlestick', traces, layout, {{responsive: true}});
+        }}
+
+        function changeZoom(zoom) {{
+            currentZoom = zoom;
+            const selectVal = document.getElementById('stock-select').value;
+            renderCandlestick(selectVal);
+        }}
+
+        // ----------------------------------------------------
+        // TABLES DRAW & SORT LOGIC
+        // ----------------------------------------------------
+        function renderTickersTable() {{
+            const tbody = document.getElementById('tickers-table-body');
+            tbody.innerHTML = '';
+
+            if (reportData.mode === 'portfolio') {{
+                // Portfolio doesn't list individual summaries by default, but let's draw it from stock signals if exists
+                // We'll hide this tab or write a fallback
+                document.getElementById('tab-btn-tickers').classList.add('hidden');
+                return;
+            }}
+
+            for (const [ticker, s] of Object.entries(reportData.tickers_summary)) {{
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-800/40 transition duration-150';
+                
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-semibold text-white">${{ticker}}</td>
+                    <td class="px-6 py-4">${{s.total_trades}}</td>
+                    <td class="px-6 py-4 text-blue-400">${{s.filled_trades}}</td>
+                    <td class="px-6 py-4 text-green-400">${{s.completed_trades}}</td>
+                    <td class="px-6 py-4">${{s.open_trades}}</td>
+                    <td class="px-6 py-4">${{s.win_rate_pct.toFixed(1)}}%</td>
+                    <td class="px-6 py-4 font-semibold text-green-400">+${{s.avg_return_pct.toFixed(2)}}%</td>
+                    <td class="px-6 py-4">${{s.avg_holding_days.toFixed(1)}}</td>
+                    <td class="px-6 py-4">${{s.profit_factor === 'Infinity' ? '∞' : s.profit_factor.toFixed(2)}}</td>
+                    <td class="px-6 py-4 text-red-400">${{s.max_mae_pct.toFixed(2)}}%</td>
+                `;
+                tbody.appendChild(tr);
+            }}
+        }}
+
+        function renderTradesTable() {{
+            const tbody = document.getElementById('trades-table-body');
+            tbody.innerHTML = '';
+            
+            document.getElementById('trades-total-count').innerText = reportData.trades.length;
+            document.getElementById('trades-showing-count').innerText = currentTrades.length;
+
+            currentTrades.forEach(t => {{
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-800/40 transition duration-150 text-xs md:text-sm';
+                
+                // Color PnL
+                let pnlClass = 'text-gray-400';
+                let pnlSign = '';
+                if (t.status !== 'PENDING') {{
+                    pnlClass = t.pnl_pct >= 0 ? 'text-green-400 font-semibold' : 'text-red-400 font-semibold';
+                    pnlSign = t.pnl_pct >= 0 ? '+' : '';
+                }}
+
+                // Badges for Status
+                let statusBadge = '';
+                if (t.status === 'COMPLETED') {{
+                    statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-900/30 text-green-400 border border-green-800/40">COMPLETED</span>';
+                }} else if (t.status === 'OPEN') {{
+                    statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-900/30 text-blue-400 border border-blue-800/40">OPEN</span>';
+                }} else {{
+                    statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-900/30 text-yellow-400 border border-yellow-800/40">PENDING</span>';
+                }}
+
+                tr.innerHTML = `
+                    <td class="px-6 py-3.5 font-bold text-white">${{t.ticker}}</td>
+                    <td class="px-6 py-3.5 text-gray-300">${{t.trigger_date}}</td>
+                    <td class="px-6 py-3.5 text-gray-300">${{t.fill_date ? t.fill_date : '—'}}</td>
+                    <td class="px-6 py-3.5 text-gray-300">${{t.exit_date ? t.exit_date : t.status === 'OPEN' ? 'Active' : '—'}}</td>
+                    <td class="px-6 py-3.5 font-medium">${{t.entry_price.toFixed(2)}}</td>
+                    <td class="px-6 py-3.5 font-medium">${{t.exit_price ? t.exit_price.toFixed(2) : '—'}}</td>
+                    <td class="px-6 py-3.5 ${{pnlClass}}">${{t.status !== 'PENDING' ? pnlSign + t.pnl_pct.toFixed(2) + '%' : '0.00%'}}</td>
+                    <td class="px-6 py-3.5">${{t.status !== 'PENDING' ? t.holding_days + ' Days' : '0 Days'}}</td>
+                    <td class="px-6 py-3.5">${{statusBadge}}</td>
+                    <td class="px-6 py-3.5 text-red-400">${{t.status !== 'PENDING' ? t.max_drawdown_pct.toFixed(2) + '%' : '—'}}</td>
+                `;
+                tbody.appendChild(tr);
+            }});
+        }}
+
+        function filterTrades() {{
+            const search = document.getElementById('trade-search').value.toUpperCase();
+            const status = document.getElementById('status-filter').value;
+
+            currentTrades = reportData.trades.filter(t => {{
+                const matchesSearch = t.ticker.toUpperCase().includes(search);
+                const matchesStatus = status === 'ALL' || t.status === status;
+                return matchesSearch && matchesStatus;
+            }});
+
+            // Re-apply sorting
+            applySorting();
+            renderTradesTable();
+        }}
+
+        function sortTrades(colName) {{
+            if (sortedColumn === colName) {{
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            }} else {{
+                sortedColumn = colName;
+                sortDirection = 'asc';
+            }}
+            applySorting();
+            renderTradesTable();
+        }}
+
+        function applySorting() {{
+            currentTrades.sort((a, b) => {{
+                let valA = a[sortedColumn];
+                let valB = b[sortedColumn];
+
+                // Deal with null/undefined values
+                if (valA === null || valA === undefined) return sortDirection === 'asc' ? 1 : -1;
+                if (valB === null || valB === undefined) return sortDirection === 'asc' ? -1 : 1;
+
+                if (typeof valA === 'string') {{
+                    return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                }} else {{
+                    return sortDirection === 'asc' ? valA - valB : valB - valA;
+                }}
+            }});
+        }}
+    </script>
+</body>
+</html>
+"""
+        
+        # 6. Write file
+        with open(output_filename, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        print(f"Standalone HTML dashboard successfully saved to: {output_filename}")

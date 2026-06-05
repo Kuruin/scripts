@@ -361,10 +361,16 @@ class BacktestEngine:
         
         if filled_count == 0:
             return {
-                "total_trades": total_trades, "filled_trades": 0, "completed_trades": 0,
-                "open_trades": 0, "pending_trades": pending_count, "win_rate": 0.0,
-                "avg_return_pct": 0.0, "avg_holding_days": 0.0, "profit_factor": 0.0,
-                "max_drawdown_pct": 0.0
+                "total_trades": total_trades,
+                "filled_trades": 0,
+                "completed_trades": 0,
+                "open_trades": 0,
+                "pending_trades": pending_count,
+                "win_rate_pct": 0.0,
+                "avg_return_pct": 0.0,
+                "avg_holding_days": 0.0,
+                "profit_factor": 0.0,
+                "max_mae_pct": 0.0
             }
             
         # Win rate is based on completed trades

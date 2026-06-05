@@ -8,19 +8,26 @@ from config import (
     DEFAULT_END_DATE,
     DEFAULT_INITIAL_CAPITAL,
     DEFAULT_COMMISSION,
-    DEFAULT_V20_MIN_PCT_MOVE
+    DEFAULT_V20_MIN_PCT_MOVE,
+    RESULTS_DIR
 )
 from data_loader import get_stock_data
 from strategies import V20Strategy
 from engine import BacktestEngine
+from report_generator import HTMLReportGenerator
 
 def load_tickers_from_file(file_path: str) -> list:
     """Reads ticker symbols from a file, one per line."""
     if not os.path.exists(file_path):
         return []
-    with open(file_path, 'r') as f:
-        tickers = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-    return list(set(tickers))
+    tickers = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            val = line.strip()
+            if val and not val.startswith("#"):
+                if val not in tickers:
+                    tickers.append(val)
+    return tickers
 
 def print_separator(char="=", length=70):
     print(char * length)
@@ -57,17 +64,26 @@ def main():
     args = parser.parse_args()
     
     # 1. Determine which tickers to use
-    tickers = []
+    raw_tickers = []
     if args.tickers:
-        tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+        raw_tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     elif os.path.exists(args.file):
-        tickers = load_tickers_from_file(args.file)
-        print(f"Loaded {len(tickers)} tickers from file: {args.file}")
+        raw_tickers = load_tickers_from_file(args.file)
+        print(f"Loaded {len(raw_tickers)} tickers from file: {args.file}")
     
-    if not tickers:
-        tickers = DEFAULT_TICKERS
-        print(f"Using default ticker list ({len(tickers)} tickers).")
+    if not raw_tickers:
+        raw_tickers = DEFAULT_TICKERS
+        print(f"Using default ticker list ({len(raw_tickers)} tickers).")
         
+    # Resolve ticker suffixes (append .NS if missing)
+    tickers = []
+    for t in raw_tickers:
+        t_clean = t.strip().upper()
+        if t_clean:
+            if "." not in t_clean:
+                t_clean = t_clean + ".NS"
+            tickers.append(t_clean)
+            
     # 2. Fetch data
     print_header(f"LOADING STOCK DATA ({args.start} to {args.end})")
     data_dict = {}
@@ -129,8 +145,9 @@ def main():
                 'InitialMove_%': round(t.initial_move_pct, 2)
             })
         trades_df = pd.DataFrame(trades_list)
-        trades_df.to_csv("results_trades_individual.csv", index=False)
-        print("Saved trade list to: results_trades_individual.csv")
+        trades_path = os.path.join(RESULTS_DIR, "results_trades_individual.csv")
+        trades_df.to_csv(trades_path, index=False)
+        print(f"Saved trade list to: {trades_path}")
         
         # Save Ticker Summary CSV
         summary_list = []
@@ -149,8 +166,9 @@ def main():
                 'MaxMAE_%': round(s['max_mae_pct'], 2)
             })
         summary_df = pd.DataFrame(summary_list)
-        summary_df.to_csv("results_tickers_individual.csv", index=False)
-        print("Saved stock-by-stock summary to: results_tickers_individual.csv")
+        summary_path = os.path.join(RESULTS_DIR, "results_tickers_individual.csv")
+        summary_df.to_csv(summary_path, index=False)
+        print(f"Saved stock-by-stock summary to: {summary_path}")
 
     elif args.mode == "portfolio":
         print_header(f"RUNNING PORTFOLIO SIMULATION (CAPITAL: {args.capital:,.2f})")
@@ -205,16 +223,32 @@ def main():
                 'MaxPaperLoss_%': round(t.max_drawdown_pct, 2)
             })
         trades_df = pd.DataFrame(trades_list)
-        trades_df.to_csv("results_trades_portfolio.csv", index=False)
-        print("Saved portfolio trade list to: results_trades_portfolio.csv")
+        trades_path = os.path.join(RESULTS_DIR, "results_trades_portfolio.csv")
+        trades_df.to_csv(trades_path, index=False)
+        print(f"Saved portfolio trade list to: {trades_path}")
         
         # Save Equity Curve CSV
         equity_df = pd.DataFrame(equity).reset_index()
         equity_df.columns = ['Date', 'Equity']
         # Format Date column
         equity_df['Date'] = equity_df['Date'].dt.strftime("%Y-%m-%d")
-        equity_df.to_csv("results_equity_curve.csv", index=False)
-        print("Saved daily equity curve to: results_equity_curve.csv")
+        equity_path = os.path.join(RESULTS_DIR, "results_equity_curve.csv")
+        equity_df.to_csv(equity_path, index=False)
+        print(f"Saved daily equity curve to: {equity_path}")
+
+    # 5. Generate Standalone HTML Report
+    print_header("GENERATING HTML VISUAL DASHBOARD")
+    report_file = os.path.join(RESULTS_DIR, f"backtest_report_{args.mode}.html")
+    try:
+        HTMLReportGenerator.generate(
+            backtest_results=results,
+            data_dict=data_dict,
+            mode=args.mode,
+            min_move=args.min_move,
+            output_filename=report_file
+        )
+    except Exception as e:
+        print(f"Error generating HTML report: {e}")
 
 if __name__ == "__main__":
     main()

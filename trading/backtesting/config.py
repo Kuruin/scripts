@@ -3,9 +3,11 @@ import os
 # Project Directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, ".cache")
+RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
-# Create cache directory if it doesn't exist
+# Create directories if they don't exist
 os.makedirs(CACHE_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # Default Backtest Parameters
 DEFAULT_START_DATE = "2021-01-01"
