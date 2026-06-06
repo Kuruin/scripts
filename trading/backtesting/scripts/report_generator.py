@@ -445,21 +445,23 @@ class HTMLReportGenerator:
         <!-- TAB 4: TICKERS PERFORMANCE -->
         <!-- ============================================== -->
         <div id="tab-tickers" class="tab-content flex flex-col gap-4 hidden">
+            <p class="text-xs text-gray-500">Click any stock row to expand its individual trades.</p>
             <div class="card rounded-xl overflow-hidden shadow-lg border border-gray-800">
-                <div class="overflow-x-auto max-h-[500px]">
+                <div class="overflow-x-auto">
                     <table class="min-w-full text-left border-collapse text-sm">
                         <thead class="bg-gray-900 sticky top-0 border-b border-gray-800 text-xs uppercase text-gray-400 font-semibold">
                             <tr>
-                                <th class="px-6 py-3">Ticker</th>
-                                <th class="px-6 py-3">Signals</th>
-                                <th class="px-6 py-3">Filled</th>
-                                <th class="px-6 py-3">Closed</th>
-                                <th class="px-6 py-3">Active</th>
-                                <th class="px-6 py-3">Win Rate</th>
-                                <th class="px-6 py-3">Avg Return</th>
-                                <th class="px-6 py-3">Avg Hold (Days)</th>
-                                <th class="px-6 py-3">Profit Factor</th>
-                                <th class="px-6 py-3">Max Paper Drawdown</th>
+                                <th class="px-4 py-3 w-6"></th>
+                                <th class="px-4 py-3">Ticker</th>
+                                <th class="px-4 py-3">Signals</th>
+                                <th class="px-4 py-3">Filled</th>
+                                <th class="px-4 py-3">Closed</th>
+                                <th class="px-4 py-3">Active</th>
+                                <th class="px-4 py-3">Win Rate</th>
+                                <th class="px-4 py-3">Avg Return</th>
+                                <th class="px-4 py-3">Avg Hold</th>
+                                <th class="px-4 py-3">Profit Factor</th>
+                                <th class="px-4 py-3">Max Drawdown</th>
                             </tr>
                         </thead>
                         <tbody id="tickers-table-body" class="divide-y divide-gray-800">
@@ -974,30 +976,106 @@ class HTMLReportGenerator:
             tbody.innerHTML = '';
 
             if (reportData.mode === 'portfolio') {{
-                // Portfolio doesn't list individual summaries by default, but let's draw it from stock signals if exists
-                // We'll hide this tab or write a fallback
                 document.getElementById('tab-btn-tickers').classList.add('hidden');
                 return;
             }}
 
+            // Group trades by ticker for inline expansion
+            const tradesByTicker = {{}};
+            reportData.trades.forEach(t =>
+                (tradesByTicker[t.ticker] = tradesByTicker[t.ticker] || []).push(t)
+            );
+
             for (const [ticker, s] of Object.entries(reportData.tickers_summary)) {{
+                const rowId = 'expand-' + ticker.split('.').join('_');
+
+                // Summary row
                 const tr = document.createElement('tr');
-                tr.className = 'hover:bg-gray-800/40 transition duration-150';
-                
+                tr.className = 'cursor-pointer hover:bg-gray-800/50 transition duration-150 select-none';
+                tr.onclick = () => toggleTickerTrades(rowId);
+
                 tr.innerHTML = `
-                    <td class="px-6 py-4 font-semibold text-white">${{ticker}}</td>
-                    <td class="px-6 py-4">${{s.total_trades}}</td>
-                    <td class="px-6 py-4 text-blue-400">${{s.filled_trades}}</td>
-                    <td class="px-6 py-4 text-green-400">${{s.completed_trades}}</td>
-                    <td class="px-6 py-4">${{s.open_trades}}</td>
-                    <td class="px-6 py-4">${{s.win_rate_pct.toFixed(1)}}%</td>
-                    <td class="px-6 py-4 font-semibold text-green-400">+${{s.avg_return_pct.toFixed(2)}}%</td>
-                    <td class="px-6 py-4">${{s.avg_holding_days.toFixed(1)}}</td>
-                    <td class="px-6 py-4">${{s.profit_factor === 'Infinity' ? '∞' : s.profit_factor.toFixed(2)}}</td>
-                    <td class="px-6 py-4 text-red-400">${{s.max_mae_pct.toFixed(2)}}%</td>
+                    <td class="px-4 py-3 text-gray-500 text-xs" id="arrow-${{rowId}}">▶</td>
+                    <td class="px-4 py-3 font-semibold text-white">${{ticker}}</td>
+                    <td class="px-4 py-3 text-gray-300">${{s.total_trades}}</td>
+                    <td class="px-4 py-3 text-blue-400">${{s.filled_trades}}</td>
+                    <td class="px-4 py-3 text-green-400">${{s.completed_trades}}</td>
+                    <td class="px-4 py-3 text-gray-300">${{s.open_trades}}</td>
+                    <td class="px-4 py-3">${{s.win_rate_pct.toFixed(1)}}%</td>
+                    <td class="px-4 py-3 font-semibold ${{s.avg_return_pct >= 0 ? 'text-green-400' : 'text-red-400'}}">${{s.avg_return_pct >= 0 ? '+' : ''}}${{s.avg_return_pct.toFixed(2)}}%</td>
+                    <td class="px-4 py-3">${{s.avg_holding_days.toFixed(1)}}d</td>
+                    <td class="px-4 py-3">${{s.profit_factor === 'Infinity' ? '∞' : s.profit_factor.toFixed(2)}}</td>
+                    <td class="px-4 py-3 text-red-400">${{s.max_mae_pct.toFixed(2)}}%</td>
                 `;
                 tbody.appendChild(tr);
+
+                // Expanded trades sub-table row (hidden by default)
+                const expRow = document.createElement('tr');
+                expRow.id = rowId;
+                expRow.classList.add('hidden');
+
+                const tickerTrades = tradesByTicker[ticker] || [];
+                const tradeRows = tickerTrades.map(t => {{
+                    let pnlClass = 'text-gray-400';
+                    let pnlText = '—';
+                    if (t.status !== 'PENDING') {{
+                        pnlClass = t.pnl_pct >= 0 ? 'text-green-400 font-semibold' : 'text-red-400 font-semibold';
+                        pnlText = (t.pnl_pct >= 0 ? '+' : '') + t.pnl_pct.toFixed(2) + '%';
+                    }}
+                    let badge = '';
+                    if (t.status === 'COMPLETED')  badge = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-900/30 text-green-400 border border-green-800/40">DONE</span>';
+                    else if (t.status === 'OPEN')   badge = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-900/30 text-blue-400 border border-blue-800/40">OPEN</span>';
+                    else                            badge = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-900/30 text-yellow-400 border border-yellow-800/40">WAIT</span>';
+
+                    return `<tr class="border-t border-gray-800/60 hover:bg-gray-800/20">
+                        <td class="pl-10 pr-3 py-2 text-gray-500 text-xs">#</td>
+                        <td class="px-3 py-2 text-gray-400 text-xs">${{t.trigger_date}}</td>
+                        <td class="px-3 py-2 text-gray-300 text-xs">${{t.fill_date || '—'}}</td>
+                        <td class="px-3 py-2 text-gray-300 text-xs">${{t.exit_date || (t.status === 'OPEN' ? 'Active' : '—')}}</td>
+                        <td class="px-3 py-2 text-xs">₹${{t.entry_price.toFixed(2)}}</td>
+                        <td class="px-3 py-2 text-xs">${{t.exit_price ? '₹' + t.exit_price.toFixed(2) : '—'}}</td>
+                        <td class="px-3 py-2 text-xs ${{pnlClass}}">${{pnlText}}</td>
+                        <td class="px-3 py-2 text-xs text-gray-400">${{t.status !== 'PENDING' ? t.holding_days + 'd' : '—'}}</td>
+                        <td class="px-3 py-2 text-xs">${{badge}}</td>
+                        <td class="px-3 py-2 text-xs text-red-400">${{t.status !== 'PENDING' ? t.max_drawdown_pct.toFixed(2) + '%' : '—'}}</td>
+                        <td></td>
+                    </tr>`;
+                }}).join('');
+
+                expRow.innerHTML = `
+                    <td colspan="11" class="p-0">
+                        <div class="bg-gray-900/60 border-y border-gray-700/50">
+                            <table class="min-w-full border-collapse text-xs">
+                                <thead>
+                                    <tr class="text-gray-500 text-xs uppercase">
+                                        <th class="pl-10 pr-3 py-2 text-left w-6"></th>
+                                        <th class="px-3 py-2 text-left">Trigger</th>
+                                        <th class="px-3 py-2 text-left">Fill Date</th>
+                                        <th class="px-3 py-2 text-left">Exit Date</th>
+                                        <th class="px-3 py-2 text-left">Entry</th>
+                                        <th class="px-3 py-2 text-left">Exit</th>
+                                        <th class="px-3 py-2 text-left">PnL %</th>
+                                        <th class="px-3 py-2 text-left">Duration</th>
+                                        <th class="px-3 py-2 text-left">Status</th>
+                                        <th class="px-3 py-2 text-left">Max DD</th>
+                                        <th class="px-3 py-2"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>${{tradeRows || '<tr><td colspan="11" class="px-10 py-3 text-gray-600">No trades</td></tr>'}}</tbody>
+                            </table>
+                        </div>
+                    </td>`;
+                tbody.appendChild(expRow);
             }}
+        }}
+
+        function toggleTickerTrades(rowId) {{
+            const row = document.getElementById(rowId);
+            const arrow = document.getElementById('arrow-' + rowId);
+            if (!row) return;
+            const isHidden = row.classList.contains('hidden');
+            row.classList.toggle('hidden', !isHidden);
+            if (arrow) arrow.textContent = isHidden ? '▼' : '▶';
         }}
 
         function renderTradesTable() {{

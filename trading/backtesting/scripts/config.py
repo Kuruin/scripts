@@ -1,7 +1,8 @@
 import os
 
 # Project Directories
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(SCRIPTS_DIR)   # backtesting/ root
 CACHE_DIR = os.path.join(BASE_DIR, ".cache")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
@@ -10,7 +11,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # Default Backtest Parameters
-DEFAULT_START_DATE = "2021-01-01"
+DEFAULT_START_DATE = "2010-01-05"
 DEFAULT_END_DATE = "2026-06-01"
 DEFAULT_INITIAL_CAPITAL = 100000.0
 DEFAULT_COMMISSION = 0.0  # Fees/slippage per trade (fraction of trade value)
