@@ -155,7 +155,9 @@ class HTMLReportGenerator:
     <title>V20 Backtest Report - Standalone Dashboard</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Plotly.js -->
+    <!-- TradingView Lightweight Charts -->
+    <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+    <!-- Plotly.js (for equity/drawdown/distribution charts) -->
     <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
     <style>
         body {{
@@ -184,6 +186,19 @@ class HTMLReportGenerator:
         }}
         ::-webkit-scrollbar-thumb:hover {{
             background: #374151;
+        }}
+        /* TradingView chart container */
+        #tv-chart-container {{
+            position: relative;
+            width: 100%;
+            height: 520px;
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        /* Zoom button active state */
+        .zoom-btn.active {{
+            background-color: #1d4ed8;
+            color: #fff;
         }}
     </style>
 </head>
@@ -391,7 +406,18 @@ class HTMLReportGenerator:
             </div>
             
             <div class="card p-4 rounded-xl shadow-lg">
-                <div id="plotly-candlestick" class="w-full" style="height: 500px;"></div>
+                <div id="tv-chart-title" class="text-sm font-semibold text-gray-200 mb-2 flex items-center gap-2">
+                    <span id="tv-ticker-label" class="text-blue-400 font-bold text-base"></span>
+                    <span class="text-gray-500 text-xs">Candlestick &amp; V20 Trade Overlays</span>
+                </div>
+                <div id="tv-chart-container"></div>
+                <!-- Legend -->
+                <div class="flex flex-wrap items-center gap-4 mt-3 text-xs text-gray-400">
+                    <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-emerald-400"></span> Buy Executed</span>
+                    <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-red-400"></span> Sell Executed</span>
+                    <span class="flex items-center gap-1"><span class="inline-block w-2 h-0.5 bg-emerald-500 border-t border-dashed border-emerald-500"></span> Limit Buy Level</span>
+                    <span class="flex items-center gap-1"><span class="inline-block w-2 h-0.5 bg-red-500 border-t border-dashed border-red-500"></span> Sell Target Level</span>
+                </div>
             </div>
         </div>
 
@@ -747,7 +773,9 @@ class HTMLReportGenerator:
                     Plotly.Plots.resize(document.getElementById('plotly-distribution'));
                 }}
             }} else if (tabId === 'charts') {{
-                Plotly.Plots.resize(document.getElementById('plotly-candlestick'));
+                if (tvChart) {{
+                    tvChart.applyOptions({{ width: document.getElementById('tv-chart-container').clientWidth }});
+                }}
             }}
         }}
 
@@ -833,16 +861,27 @@ class HTMLReportGenerator:
         }}
 
         // ----------------------------------------------------
-        // CANDLESTICK CHART OVERLAY
+        // TRADINGVIEW LIGHTWEIGHT CHARTS — CANDLESTICK
         // ----------------------------------------------------
+        let tvChart = null;       // LWC chart instance
+        let tvCandleSeries = null; // candlestick series
+
+        function dateToTimestamp(dateStr) {{
+            // Convert "YYYY-MM-DD" to UTC unix seconds (LWC time format)
+            return Math.floor(new Date(dateStr + 'T00:00:00Z').getTime() / 1000);
+        }}
+
         function renderCandlestick(ticker) {{
             const priceData = reportData.prices[ticker] || [];
             if (priceData.length === 0) return;
 
-            // Date filtering
+            // Update title label
+            document.getElementById('tv-ticker-label').innerText = ticker;
+
+            // Date filtering based on zoom
             let filteredPrice = [...priceData];
             const lastDateObj = new Date(priceData[priceData.length - 1].date);
-            
+
             if (currentZoom === '2y') {{
                 const cutoff = new Date(lastDateObj);
                 cutoff.setFullYear(cutoff.getFullYear() - 2);
@@ -857,109 +896,141 @@ class HTMLReportGenerator:
                 filteredPrice = priceData.filter(p => new Date(p.date) >= cutoff);
             }}
 
-            const cutoffDateStr = filteredPrice[0].date;
+            const cutoffDateStr = filteredPrice.length > 0 ? filteredPrice[0].date : '';
 
-            const x = filteredPrice.map(d => d.date);
-            const open = filteredPrice.map(d => d.o);
-            const high = filteredPrice.map(d => d.h);
-            const low = filteredPrice.map(d => d.l);
-            const close = filteredPrice.map(d => d.c);
+            // ---- Build or Recreate LWC Chart ----
+            const container = document.getElementById('tv-chart-container');
 
-            const candleTrace = {{
-                x: x,
-                open: open,
-                high: high,
-                low: low,
-                close: close,
-                type: 'candlestick',
-                name: 'OHLC',
-                increasing: {{ line: {{ color: '#10b981' }} }},
-                decreasing: {{ line: {{ color: '#ef4444' }} }}
-            }};
+            if (tvChart) {{
+                tvChart.remove();
+                tvChart = null;
+                tvCandleSeries = null;
+            }}
 
-            const traces = [candleTrace];
-            
-            // Filter setups/trades for overlay
+            tvChart = LightweightCharts.createChart(container, {{
+                width: container.clientWidth,
+                height: 520,
+                layout: {{
+                    background: {{ type: 'solid', color: '#111827' }},
+                    textColor: '#94a3b8',
+                    fontSize: 12,
+                    fontFamily: "'Inter', 'Roboto', sans-serif",
+                }},
+                grid: {{
+                    vertLines: {{ color: '#1f2937', style: 1 }},
+                    horzLines: {{ color: '#1f2937', style: 1 }},
+                }},
+                crosshair: {{
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: {{ color: '#475569', width: 1, style: 2 }},
+                    horzLine: {{ color: '#475569', width: 1, style: 2 }},
+                }},
+                rightPriceScale: {{
+                    borderColor: '#1f2937',
+                    textColor: '#94a3b8',
+                }},
+                timeScale: {{
+                    borderColor: '#1f2937',
+                    timeVisible: true,
+                    secondsVisible: false,
+                    barSpacing: 6,
+                }},
+                handleScroll: true,
+                handleScale: true,
+            }});
+
+            // Make chart responsive on window resize
+            const resizeObserver = new ResizeObserver(entries => {{
+                if (tvChart) {{
+                    tvChart.applyOptions({{ width: container.clientWidth }});
+                }}
+            }});
+            resizeObserver.observe(container);
+
+            // ---- Candlestick Series ----
+            tvCandleSeries = tvChart.addCandlestickSeries({{
+                upColor: '#10b981',
+                downColor: '#ef4444',
+                borderUpColor: '#10b981',
+                borderDownColor: '#ef4444',
+                wickUpColor: '#10b981',
+                wickDownColor: '#ef4444',
+            }});
+
+            const candleData = filteredPrice.map(d => ({{
+                time: dateToTimestamp(d.date),
+                open: d.o,
+                high: d.h,
+                low: d.l,
+                close: d.c,
+            }}));
+            tvCandleSeries.setData(candleData);
+
+            // ---- Trade Markers (Buy / Sell) ----
             const tickerTrades = reportData.trades.filter(t => t.ticker === ticker);
-            
-            let addedBuyLegend = false;
-            let addedSellLegend = false;
-            let addedLevelLegend = false;
+            const markers = [];
 
             tickerTrades.forEach(trade => {{
-                // Skip if trigger was before plot range
-                if (trade.trigger_date < cutoffDateStr) return;
-
-                // Entry levels
-                const limitEnd = trade.fill_date ? trade.fill_date : priceData[priceData.length - 1].date;
-                const exitEnd = trade.exit_date ? trade.exit_date : priceData[priceData.length - 1].date;
-                
-                // Entry Line (Green dashed)
-                traces.push({{
-                    x: [trade.trigger_date, limitEnd],
-                    y: [trade.entry_price, trade.entry_price],
-                    mode: 'lines',
-                    line: {{ color: '#10B981', width: 1.5, dash: 'dash' }},
-                    name: 'Limit Buy Target',
-                    showlegend: !addedLevelLegend,
-                    hoverinfo: 'skip'
-                }});
-
-                // Exit Line (Red dashed)
-                const targetPrice = trade.status === 'COMPLETED' ? trade.exit_price : (trade.entry_price * (1 + reportData.min_move/100));
-                traces.push({{
-                    x: [trade.trigger_date, exitEnd],
-                    y: [targetPrice, targetPrice],
-                    mode: 'lines',
-                    line: {{ color: '#EF4444', width: 1.5, dash: 'dash' }},
-                    name: 'Sell Target',
-                    showlegend: !addedLevelLegend,
-                    hoverinfo: 'skip'
-                }});
-                
-                addedLevelLegend = true;
-
-                // Buy Entry Marker
+                // Buy executed marker
                 if (trade.fill_date && trade.fill_date >= cutoffDateStr) {{
-                    traces.push({{
-                        x: [trade.fill_date],
-                        y: [trade.entry_price],
-                        mode: 'markers',
-                        marker: {{ symbol: 'triangle-up', color: '#10b981', size: 12, line: {{ color: 'white', width: 1 }} }},
-                        name: 'Buy Executed',
-                        showlegend: !addedBuyLegend,
-                        hovertext: `Buy Entry: ${{trade.entry_price.toFixed(2)}}`
+                    markers.push({{
+                        time: dateToTimestamp(trade.fill_date),
+                        position: 'belowBar',
+                        color: '#10b981',
+                        shape: 'arrowUp',
+                        text: 'BUY @' + trade.entry_price.toFixed(2),
+                        size: 1,
                     }});
-                    addedBuyLegend = true;
                 }}
 
-                // Sell Exit Marker
+                // Sell executed marker
                 if (trade.exit_date && trade.exit_date >= cutoffDateStr) {{
-                    traces.push({{
-                        x: [trade.exit_date],
-                        y: [trade.exit_price],
-                        mode: 'markers',
-                        marker: {{ symbol: 'triangle-down', color: '#ef4444', size: 12, line: {{ color: 'white', width: 1 }} }},
-                        name: 'Sell Executed',
-                        showlegend: !addedSellLegend,
-                        hovertext: `Sell Target: ${{trade.exit_price.toFixed(2)}} (PnL: ${{trade.pnl_pct.toFixed(1)}}%)`
+                    const pnlSign = trade.pnl_pct >= 0 ? '+' : '';
+                    markers.push({{
+                        time: dateToTimestamp(trade.exit_date),
+                        position: 'aboveBar',
+                        color: '#ef4444',
+                        shape: 'arrowDown',
+                        text: 'SELL @' + trade.exit_price.toFixed(2) + ' (' + pnlSign + trade.pnl_pct.toFixed(1) + '%)',
+                        size: 1,
                     }});
-                    addedSellLegend = true;
                 }}
             }});
 
-            const layout = {{
-                title: {{ text: ticker + ' Candlestick & V20 Overlays', font: {{ color: '#ffffff', size: 16 }} }},
-                xaxis: {{ gridcolor: '#1f2937', linecolor: '#374151', rangeslider: {{ visible: false }} }},
-                yaxis: {{ gridcolor: '#1f2937', linecolor: '#374151' }},
-                paper_bgcolor: 'rgba(0,0,0,0)',
-                plot_bgcolor: '#111827',
-                margin: {{ l: 50, r: 20, t: 50, b: 40 }},
-                font: {{ color: '#cbd5e1' }},
-                legend: {{ orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 }}
-            }};
+            // Sort markers by time (required by LWC)
+            markers.sort((a, b) => a.time - b.time);
+            tvCandleSeries.setMarkers(markers);
 
-            Plotly.newPlot('plotly-candlestick', traces, layout, {{responsive: true}});
+            // ---- Price Lines for Entry/Exit Levels ----
+            tickerTrades.forEach(trade => {{
+                if (trade.trigger_date < cutoffDateStr) return;
+
+                // Green dashed: Limit Buy level
+                tvCandleSeries.createPriceLine({{
+                    price: trade.entry_price,
+                    color: '#10b981',
+                    lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Dashed,
+                    axisLabelVisible: true,
+                    title: 'Buy Limit',
+                }});
+
+                // Red dashed: Sell Target level
+                const targetPrice = trade.status === 'COMPLETED'
+                    ? trade.exit_price
+                    : (trade.entry_price * (1 + reportData.min_move / 100));
+                tvCandleSeries.createPriceLine({{
+                    price: targetPrice,
+                    color: '#ef4444',
+                    lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Dashed,
+                    axisLabelVisible: true,
+                    title: 'Sell Target',
+                }});
+            }});
+
+            // Fit to visible range
+            tvChart.timeScale().fitContent();
         }}
 
         function changeZoom(zoom) {{
