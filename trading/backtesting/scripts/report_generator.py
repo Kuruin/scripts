@@ -1363,8 +1363,8 @@ class HTMLReportGenerator:
         function renderCapitalJourney() {{
             if (reportData.mode !== 'portfolio') return;
             const sum = reportData.portfolio_summary;
-            document.getElementById('jrn-initial').innerText = '&#8377;' + Math.round(sum.initial_capital).toLocaleString('en-IN');
-            document.getElementById('jrn-final').innerText   = '&#8377;' + Math.round(sum.final_equity).toLocaleString('en-IN');
+            document.getElementById('jrn-initial').innerText = '₹' + Math.round(sum.initial_capital).toLocaleString('en-IN');
+            document.getElementById('jrn-final').innerText   = '₹' + Math.round(sum.final_equity).toLocaleString('en-IN');
             const equityByDate = {{}};
             reportData.equity_curve.forEach(e => {{ equityByDate[e.date] = e.val; }});
             const filledTrades = reportData.trades
@@ -1375,9 +1375,9 @@ class HTMLReportGenerator:
                 totalDeployed += (t.shares || 0) * t.entry_price;
                 totalProfit   += (t.pnl_cash || 0);
             }});
-            document.getElementById('jrn-deployed').innerText = '&#8377;' + Math.round(totalDeployed).toLocaleString('en-IN');
+            document.getElementById('jrn-deployed').innerText = '₹' + Math.round(totalDeployed).toLocaleString('en-IN');
             const profitEl = document.getElementById('jrn-profit');
-            profitEl.innerText = (totalProfit >= 0 ? '+' : '') + '&#8377;' + Math.round(Math.abs(totalProfit)).toLocaleString('en-IN');
+            profitEl.innerText = (totalProfit >= 0 ? '+' : '') + '₹' + Math.round(Math.abs(totalProfit)).toLocaleString('en-IN');
             profitEl.className = 'text-xl font-bold mt-2 ' + (totalProfit >= 0 ? 'text-green-400' : 'text-red-400');
             
             // Render Trade Timeline Table
