@@ -55,9 +55,14 @@ python scripts/run.py --file stocks/v40.txt --mode individual
 python scripts/run.py --file stocks/v40-next.txt --mode individual
 ```
 
-### Portfolio Simulation Mode (with capital management)
+### Portfolio Simulation Mode (compounding 3% risk per trade)
 ```bash
-python scripts/run.py --file stocks/v40.txt --mode portfolio --capital 1000000 --max-trades 10
+python scripts/run.py --file stocks/v40.txt --mode portfolio --capital 1000000
+```
+
+### Portfolio with custom risk per trade
+```bash
+python scripts/run.py --file stocks/v40.txt --mode portfolio --capital 1000000 --risk-pct 5 --max-trades 15
 ```
 
 ### Custom Tickers (inline)
@@ -77,7 +82,8 @@ python scripts/run.py --tickers RELIANCE.NS,TCS.NS,INFY.NS --mode individual
 | `--end` | `2026-06-01` | Backtest end date (`YYYY-MM-DD`) |
 | `--mode` | `individual` | `individual` (raw stats) or `portfolio` (capital simulation) |
 | `--capital` | `100000` | Starting capital for portfolio mode |
-| `--max-trades` | `10` | Max concurrent open positions (portfolio mode) |
+| `--max-trades` | unlimited | Optional hard cap on concurrent open positions (portfolio mode) |
+| `--risk-pct` | `3.0` | % of current equity to allocate per trade — compounding (portfolio mode) |
 | `--min-move` | `20.0` | Minimum % move to qualify as a V20 setup |
 | `--commission` | `0.0` | Transaction fee as fraction of trade value |
 | `--force-download` | `false` | Bypass local cache and re-download all data |

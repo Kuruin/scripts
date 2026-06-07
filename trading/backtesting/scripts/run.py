@@ -51,8 +51,10 @@ def main():
                         help="Simulation mode: individual (raw stats) or portfolio (capital simulation)")
     parser.add_argument("--capital", type=float, default=DEFAULT_INITIAL_CAPITAL,
                         help=f"Initial capital (default: {DEFAULT_INITIAL_CAPITAL})")
-    parser.add_argument("--max-trades", type=int, default=10,
-                        help="Maximum concurrent trades in portfolio mode (default: 10)")
+    parser.add_argument("--max-trades", type=int, default=9999,
+                        help="Hard cap on concurrent open positions — default is unlimited (portfolio mode)")
+    parser.add_argument("--risk-pct", type=float, default=3.0,
+                        help="Percentage of current equity to allocate per trade in portfolio mode (default: 3.0)")
     parser.add_argument("--commission", type=float, default=DEFAULT_COMMISSION,
                         help=f"Transaction fee per order (fraction of trade value, default: {DEFAULT_COMMISSION})")
     parser.add_argument("--force-download", action="store_true",
@@ -134,8 +136,12 @@ def main():
 
 
     elif args.mode == "portfolio":
-        print_header(f"RUNNING PORTFOLIO SIMULATION (CAPITAL: {args.capital:,.2f})")
-        results = engine.run_portfolio_simulation(data_dict, strategy, max_active_trades=args.max_trades)
+        print_header(f"RUNNING PORTFOLIO SIMULATION (CAPITAL: {args.capital:,.2f} | RISK/TRADE: {args.risk_pct}%)")
+        results = engine.run_portfolio_simulation(
+            data_dict, strategy,
+            max_active_trades=args.max_trades,
+            risk_pct=args.risk_pct
+        )
         
         trades = results["trades"]
         equity = results["equity_curve"]

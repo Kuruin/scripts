@@ -84,6 +84,7 @@ class HTMLReportGenerator:
             summary = backtest_results["summary"]
             equity_curve = backtest_results["equity_curve"]
             equity_json_list = [{"date": idx.strftime("%Y-%m-%d"), "val": float(val)} for idx, val in equity_curve.items()]
+            ledger = backtest_results.get("ledger", [])
             
             # Drawdowns
             rolling_max = equity_curve.cummax()
@@ -113,6 +114,7 @@ class HTMLReportGenerator:
             portfolio_summary = {}
             equity_json_list = []
             dd_json_list = []
+            ledger = []
             
             # Stock by stock aggregations
             tickers_summary = {}
@@ -140,6 +142,7 @@ class HTMLReportGenerator:
             'tickers_summary': tickers_summary,
             'equity_curve': equity_json_list,
             'drawdown_curve': dd_json_list,
+            'ledger': ledger,
             'tickers_list': list(data_dict.keys()),
             'generation_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -229,6 +232,7 @@ class HTMLReportGenerator:
             <button id="tab-btn-charts" class="nav-tab py-2 px-1 text-gray-400 hover:text-white transition" onclick="switchTab('charts')">📈 Interactive Charts</button>
             <button id="tab-btn-trades" class="nav-tab py-2 px-1 text-gray-400 hover:text-white transition" onclick="switchTab('trades')">💼 Detailed Trade Log</button>
             <button id="tab-btn-tickers" class="nav-tab py-2 px-1 text-gray-400 hover:text-white transition" onclick="switchTab('tickers')">🗃️ Stock Performance</button>
+            <button id="tab-btn-journey" class="nav-tab py-2 px-1 text-gray-400 hover:text-white transition hidden" onclick="switchTab('journey')">💰 Capital Journey</button>
         </nav>
 
         <!-- ============================================== -->
@@ -422,7 +426,7 @@ class HTMLReportGenerator:
         </div>
 
         <!-- ============================================== -->
-        <!-- TAB 3: DETAILED TRADE LOG -->
+        <!-- TAB 3: DETAILED TRADE LOG (GROUPED BY TICKER) -->
         <!-- ============================================== -->
         <div id="tab-trades" class="tab-content flex flex-col gap-4 hidden">
             <!-- Filter Bar -->
@@ -435,28 +439,30 @@ class HTMLReportGenerator:
                         <option value="OPEN">Open Only</option>
                         <option value="PENDING">Pending Only</option>
                     </select>
+                    <select id="trade-stock-filter" class="bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="filterTrades()">
+                        <option value="ALL">All Stocks</option>
+                    </select>
                 </div>
                 <div class="text-xs text-gray-400">
-                    Showing <span id="trades-showing-count">0</span> / <span id="trades-total-count">0</span> trades
+                    Showing <span id="trades-showing-count">0</span> / <span id="trades-total-count">0</span> trades &nbsp;&bull;&nbsp; <span id="trades-group-count">0</span> stocks
                 </div>
             </div>
 
             <!-- Table -->
             <div class="card rounded-xl overflow-hidden shadow-lg border border-gray-800">
-                <div class="overflow-x-auto max-h-[500px]">
+                <div class="overflow-x-auto max-h-[600px]">
                     <table class="min-w-full text-left border-collapse text-sm">
-                        <thead class="bg-gray-900 sticky top-0 border-b border-gray-800 text-xs uppercase text-gray-400 font-semibold">
+                        <thead class="bg-gray-900 sticky top-0 border-b border-gray-800 text-xs uppercase text-gray-400 font-semibold z-10">
                             <tr>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('ticker')">Ticker ⇅</th>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('trigger_date')">Trigger Date ⇅</th>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('fill_date')">Fill Date ⇅</th>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('exit_date')">Exit Date ⇅</th>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('entry_price')">Entry Price ⇅</th>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('exit_price')">Exit Price ⇅</th>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('pnl_pct')">PnL % ⇅</th>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('holding_days')">Duration ⇅</th>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('status')">Status ⇅</th>
-                                <th class="px-6 py-3 cursor-pointer select-none hover:bg-gray-800/80" onclick="sortTrades('max_drawdown_pct')">Max Drawdown ⇅</th>
+                                <th class="px-4 py-3 w-6"></th>
+                                <th class="px-4 py-3">Ticker</th>
+                                <th class="px-4 py-3">Signals</th>
+                                <th class="px-4 py-3">Filled</th>
+                                <th class="px-4 py-3">Win Rate</th>
+                                <th class="px-4 py-3">Total P&amp;L (&#8377;)</th>
+                                <th class="px-4 py-3">Avg Return</th>
+                                <th class="px-4 py-3">Active</th>
+                                <th class="px-4 py-3" colspan="2"></th>
                             </tr>
                         </thead>
                         <tbody id="trades-table-body" class="divide-y divide-gray-800">
@@ -492,6 +498,86 @@ class HTMLReportGenerator:
                         </thead>
                         <tbody id="tickers-table-body" class="divide-y divide-gray-800">
                             <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <!-- ============================================== -->
+        <!-- TAB 5: CAPITAL JOURNEY (PORTFOLIO MODE ONLY)  -->
+        <!-- ============================================== -->
+        <div id="tab-journey" class="tab-content flex flex-col gap-6 hidden">
+            <!-- Summary Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Initial Capital</span>
+                    <span id="jrn-initial" class="text-xl font-bold mt-2 text-white">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Final Portfolio Value</span>
+                    <span id="jrn-final" class="text-xl font-bold mt-2 text-green-400">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Total Capital Deployed</span>
+                    <span id="jrn-deployed" class="text-xl font-bold mt-2 text-blue-400">-</span>
+                </div>
+                <div class="card p-4 rounded-xl shadow-md flex flex-col justify-between">
+                    <span class="text-xs text-gray-400 font-medium uppercase">Total Profit / Loss</span>
+                    <span id="jrn-profit" class="text-xl font-bold mt-2 text-yellow-400">-</span>
+                </div>
+            </div>
+            <!-- Trade Timeline Table -->
+            <div class="card rounded-xl overflow-hidden shadow-lg border border-gray-800">
+                <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-gray-300 uppercase tracking-wide">Trade-by-Trade Capital Journey</h3>
+                    <span class="text-xs text-gray-500">Sorted by fill date &uarr; &bull; Portfolio value shown at trade entry date</span>
+                </div>
+                <div class="overflow-x-auto max-h-[600px]">
+                    <table class="min-w-full text-left border-collapse text-sm">
+                        <thead class="bg-gray-900 sticky top-0 border-b border-gray-800 text-xs uppercase text-gray-400 font-semibold z-10">
+                            <tr>
+                                <th class="px-4 py-3">#</th>
+                                <th class="px-4 py-3">Fill Date</th>
+                                <th class="px-4 py-3">Ticker</th>
+                                <th class="px-4 py-3">Amount Invested</th>
+                                <th class="px-4 py-3">Entry Price</th>
+                                <th class="px-4 py-3">Exit Date</th>
+                                <th class="px-4 py-3">Exit Price</th>
+                                <th class="px-4 py-3">Return %</th>
+                                <th class="px-4 py-3">P&amp;L (&#8377;)</th>
+                                <th class="px-4 py-3">Portfolio at Entry</th>
+                                <th class="px-4 py-3">Cumulative P&amp;L</th>
+                                <th class="px-4 py-3">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="journey-table-body" class="divide-y divide-gray-800">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- Transaction Ledger Table -->
+            <div class="card rounded-xl overflow-hidden shadow-lg border border-gray-800">
+                <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-gray-300 uppercase tracking-wide">Chronological Transaction Ledger (Buy/Sell Cash Flows)</h3>
+                    <span class="text-xs text-gray-500">Sequential order of transactions &bull; Portfolio value reflects compounding effect</span>
+                </div>
+                <div class="overflow-x-auto max-h-[600px]">
+                    <table class="min-w-full text-left border-collapse text-sm">
+                        <thead class="bg-gray-900 sticky top-0 border-b border-gray-800 text-xs uppercase text-gray-400 font-semibold z-10">
+                            <tr>
+                                <th class="px-4 py-3">#</th>
+                                <th class="px-4 py-3">Date</th>
+                                <th class="px-4 py-3">Type</th>
+                                <th class="px-4 py-3">Ticker</th>
+                                <th class="px-4 py-3">Shares</th>
+                                <th class="px-4 py-3">Price</th>
+                                <th class="px-4 py-3">Amount (&#8377;)</th>
+                                <th class="px-4 py-3">Realized P&amp;L (&#8377;)</th>
+                                <th class="px-4 py-3">Cash Balance</th>
+                                <th class="px-4 py-3">Total Equity</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ledger-table-body" class="divide-y divide-gray-800">
                         </tbody>
                     </table>
                 </div>
@@ -535,6 +621,16 @@ class HTMLReportGenerator:
                 opt.value = ticker;
                 opt.innerHTML = ticker;
                 selector.appendChild(opt);
+            }});
+
+            // Populate stock dropdown selector in Detailed Trade Log
+            const tradeStockSelector = document.getElementById('trade-stock-filter');
+            const uniqueTickers = [...new Set(reportData.trades.map(t => t.ticker))].sort();
+            uniqueTickers.forEach(ticker => {{
+                let opt = document.createElement('option');
+                opt.value = ticker;
+                opt.innerHTML = ticker;
+                tradeStockSelector.appendChild(opt);
             }});
 
             // Common stats calculations (used in portfolio stats panel)
@@ -617,7 +713,11 @@ class HTMLReportGenerator:
 
             // Render tables & default stock chart
             renderTickersTable();
-            renderTradesTable();
+            renderGroupedTradesTable();
+            if (reportData.mode === 'portfolio') {{
+                document.getElementById('tab-btn-journey').classList.remove('hidden');
+                renderCapitalJourney();
+            }}
             if (reportData.tickers_list.length > 0) {{
                 renderCandlestick(reportData.tickers_list[0]);
             }}
@@ -1149,91 +1249,203 @@ class HTMLReportGenerator:
             if (arrow) arrow.textContent = isHidden ? '▼' : '▶';
         }}
 
-        function renderTradesTable() {{
+        // ----------------------------------------------------
+        // GROUPED TRADE LOG (PER-TICKER ACCORDION)
+        // ----------------------------------------------------
+        function renderGroupedTradesTable() {{
             const tbody = document.getElementById('trades-table-body');
             tbody.innerHTML = '';
-            
-            document.getElementById('trades-total-count').innerText = reportData.trades.length;
-            document.getElementById('trades-showing-count').innerText = currentTrades.length;
+            const search  = document.getElementById('trade-search').value.toUpperCase();
+            const status  = document.getElementById('status-filter').value;
+            const stockFilter = document.getElementById('trade-stock-filter').value;
+            const filtered = reportData.trades.filter(t =>
+                t.ticker.toUpperCase().includes(search) &&
+                (status === 'ALL' || t.status === status) &&
+                (stockFilter === 'ALL' || t.ticker === stockFilter)
+            );
+            document.getElementById('trades-total-count').innerText   = reportData.trades.length;
+            document.getElementById('trades-showing-count').innerText = filtered.length;
+            const groups = {{}};
+            filtered.forEach(t => {{ if (!groups[t.ticker]) groups[t.ticker] = []; groups[t.ticker].push(t); }});
+            document.getElementById('trades-group-count').innerText = Object.keys(groups).length;
 
-            currentTrades.forEach(t => {{
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-gray-800/40 transition duration-150 text-xs md:text-sm';
-                
-                // Color PnL
-                let pnlClass = 'text-gray-400';
-                let pnlSign = '';
-                if (t.status !== 'PENDING') {{
-                    pnlClass = t.pnl_pct >= 0 ? 'text-green-400 font-semibold' : 'text-red-400 font-semibold';
-                    pnlSign = t.pnl_pct >= 0 ? '+' : '';
-                }}
+            Object.keys(groups).sort().forEach(ticker => {{
+                const trades    = groups[ticker];
+                const filled    = trades.filter(t => t.status !== 'PENDING');
+                const completed = trades.filter(t => t.status === 'COMPLETED');
+                const open      = trades.filter(t => t.status === 'OPEN');
+                const wins      = completed.filter(t => t.pnl_pct > 0);
+                const winRate   = completed.length > 0 ? (wins.length / completed.length * 100) : 0;
+                const totalPnlCash = filled.reduce((s, t) => s + (t.pnl_cash || 0), 0);
+                const avgReturn = filled.length > 0 ? filled.reduce((s, t) => s + t.pnl_pct, 0) / filled.length : 0;
+                const gid = 'tgrp-' + ticker.replace(/[^a-zA-Z0-9]/g, '_');
 
-                // Badges for Status
-                let statusBadge = '';
-                if (t.status === 'COMPLETED') {{
-                    statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-900/30 text-green-400 border border-green-800/40">COMPLETED</span>';
-                }} else if (t.status === 'OPEN') {{
-                    statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-900/30 text-blue-400 border border-blue-800/40">OPEN</span>';
-                }} else {{
-                    statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-900/30 text-yellow-400 border border-yellow-800/40">PENDING</span>';
-                }}
-
-                tr.innerHTML = `
-                    <td class="px-6 py-3.5 font-bold text-white">${{t.ticker}}</td>
-                    <td class="px-6 py-3.5 text-gray-300">${{t.trigger_date}}</td>
-                    <td class="px-6 py-3.5 text-gray-300">${{t.fill_date ? t.fill_date : '—'}}</td>
-                    <td class="px-6 py-3.5 text-gray-300">${{t.exit_date ? t.exit_date : t.status === 'OPEN' ? 'Active' : '—'}}</td>
-                    <td class="px-6 py-3.5 font-medium">${{t.entry_price.toFixed(2)}}</td>
-                    <td class="px-6 py-3.5 font-medium">${{t.exit_price ? t.exit_price.toFixed(2) : '—'}}</td>
-                    <td class="px-6 py-3.5 ${{pnlClass}}">${{t.status !== 'PENDING' ? pnlSign + t.pnl_pct.toFixed(2) + '%' : '0.00%'}}</td>
-                    <td class="px-6 py-3.5">${{t.status !== 'PENDING' ? t.holding_days + ' Days' : '0 Days'}}</td>
-                    <td class="px-6 py-3.5">${{statusBadge}}</td>
-                    <td class="px-6 py-3.5 text-red-400">${{t.status !== 'PENDING' ? t.max_drawdown_pct.toFixed(2) + '%' : '—'}}</td>
+                const hdr = document.createElement('tr');
+                hdr.className = 'cursor-pointer bg-gray-900/60 hover:bg-gray-800/60 transition select-none border-b border-gray-700/60';
+                hdr.onclick = () => toggleTradeGroup(gid);
+                const pnlColor = totalPnlCash >= 0 ? 'text-green-400' : 'text-red-400';
+                const retColor = avgReturn    >= 0 ? 'text-green-400' : 'text-red-400';
+                const pnlSign  = totalPnlCash >= 0 ? '+' : '';
+                const retSign  = (filled.length > 0 && avgReturn >= 0) ? '+' : '';
+                hdr.innerHTML = `
+                    <td class="px-4 py-3 text-gray-500 text-xs" id="arrow-${{gid}}">&#9658;</td>
+                    <td class="px-4 py-3 font-bold text-white">${{ticker}}</td>
+                    <td class="px-4 py-3 text-gray-400 text-xs">${{trades.length}}</td>
+                    <td class="px-4 py-3 text-blue-400 text-xs">${{filled.length}}</td>
+                    <td class="px-4 py-3 text-xs">${{completed.length > 0 ? winRate.toFixed(0) + '%' : '&mdash;'}}</td>
+                    <td class="px-4 py-3 text-xs font-semibold ${{pnlColor}}">${{pnlSign}}&#8377;${{Math.round(Math.abs(totalPnlCash)).toLocaleString('en-IN')}}</td>
+                    <td class="px-4 py-3 text-xs ${{retColor}}">${{filled.length > 0 ? retSign + avgReturn.toFixed(2) + '%' : '&mdash;'}}</td>
+                    <td class="px-4 py-3 text-xs text-blue-300">${{open.length > 0 ? open.length + ' active' : ''}}</td>
+                    <td class="px-4 py-3" colspan="2"></td>
                 `;
-                tbody.appendChild(tr);
+                tbody.appendChild(hdr);
+
+                const expRow = document.createElement('tr');
+                expRow.id = gid;
+                expRow.classList.add('hidden');
+                const sortedTrades = [...trades].sort((a, b) =>
+                    (a.fill_date || a.trigger_date || '').localeCompare(b.fill_date || b.trigger_date || '')
+                );
+                const tradeRows = sortedTrades.map(t => {{
+                    const pnlCls  = t.status !== 'PENDING' ? (t.pnl_pct >= 0 ? 'text-green-400 font-semibold' : 'text-red-400 font-semibold') : 'text-gray-400';
+                    const pnlSgn  = (t.status !== 'PENDING' && t.pnl_pct >= 0) ? '+' : '';
+                    const pnlCash = t.pnl_cash || 0;
+                    const cashCls = pnlCash >= 0 ? 'text-green-400' : 'text-red-400';
+                    const inv     = (t.status !== 'PENDING' && t.shares) ? '&#8377;' + Math.round(t.shares * t.entry_price).toLocaleString('en-IN') : '&mdash;';
+                    let bdg = '';
+                    if (t.status === 'COMPLETED') bdg = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-900/30 text-green-400 border border-green-800/40">DONE</span>';
+                    else if (t.status === 'OPEN')  bdg = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-900/30 text-blue-400 border border-blue-800/40">OPEN</span>';
+                    else                           bdg = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-900/30 text-yellow-400 border border-yellow-800/40">WAIT</span>';
+                    return `<tr class="border-t border-gray-800/50 hover:bg-gray-800/20">
+                        <td class="pl-8 pr-3 py-2.5"></td>
+                        <td class="px-3 py-2.5 text-gray-300 text-xs">${{t.fill_date || '&mdash;'}}</td>
+                        <td class="px-3 py-2.5 text-gray-300 text-xs">${{t.exit_date || (t.status === 'OPEN' ? 'Active' : '&mdash;')}}</td>
+                        <td class="px-3 py-2.5 text-xs text-blue-300 font-mono">${{inv}}</td>
+                        <td class="px-3 py-2.5 text-xs">&#8377;${{t.entry_price.toFixed(2)}}</td>
+                        <td class="px-3 py-2.5 text-xs">${{t.exit_price ? '&#8377;' + t.exit_price.toFixed(2) : '&mdash;'}}</td>
+                        <td class="px-3 py-2.5 text-xs ${{pnlCls}}">${{t.status !== 'PENDING' ? pnlSgn + t.pnl_pct.toFixed(2) + '%' : '0.00%'}}</td>
+                        <td class="px-3 py-2.5 text-xs ${{cashCls}}">${{t.status !== 'PENDING' ? (pnlCash >= 0 ? '+' : '') + '&#8377;' + Math.round(Math.abs(pnlCash)).toLocaleString('en-IN') : '&mdash;'}}</td>
+                        <td class="px-3 py-2.5 text-xs">${{bdg}}</td>
+                        <td class="px-3 py-2.5 text-xs text-red-400">${{t.status !== 'PENDING' ? t.max_drawdown_pct.toFixed(2) + '%' : '&mdash;'}}</td>
+                    </tr>`;
+                }}).join('');
+
+                expRow.innerHTML = `<td colspan="10" class="p-0"><div class="bg-gray-950/60 border-b border-gray-700/50">
+                    <table class="min-w-full border-collapse"><thead><tr class="text-gray-500 text-xs uppercase border-b border-gray-800/80">
+                        <th class="pl-8 pr-3 py-2 text-left w-6"></th>
+                        <th class="px-3 py-2 text-left">Fill Date</th><th class="px-3 py-2 text-left">Exit Date</th>
+                        <th class="px-3 py-2 text-left">Invested</th><th class="px-3 py-2 text-left">Entry</th>
+                        <th class="px-3 py-2 text-left">Exit</th><th class="px-3 py-2 text-left">Return %</th>
+                        <th class="px-3 py-2 text-left">P&amp;L (&#8377;)</th><th class="px-3 py-2 text-left">Status</th>
+                        <th class="px-3 py-2 text-left">Max DD</th></tr></thead>
+                    <tbody>${{tradeRows || '<tr><td colspan="10" class="px-8 py-3 text-gray-600">No trades</td></tr>'}}</tbody></table>
+                </div></td>`;
+                tbody.appendChild(expRow);
             }});
+        }}
+
+        function toggleTradeGroup(gid) {{
+            const row   = document.getElementById(gid);
+            const arrow = document.getElementById('arrow-' + gid);
+            if (!row) return;
+            const isHidden = row.classList.contains('hidden');
+            row.classList.toggle('hidden', !isHidden);
+            if (arrow) arrow.innerHTML = isHidden ? '&#9660;' : '&#9658;';
         }}
 
         function filterTrades() {{
-            const search = document.getElementById('trade-search').value.toUpperCase();
-            const status = document.getElementById('status-filter').value;
+            renderGroupedTradesTable();
+        }}
 
-            currentTrades = reportData.trades.filter(t => {{
-                const matchesSearch = t.ticker.toUpperCase().includes(search);
-                const matchesStatus = status === 'ALL' || t.status === status;
-                return matchesSearch && matchesStatus;
+        // ----------------------------------------------------
+        // CAPITAL JOURNEY (PORTFOLIO MODE ONLY)
+        // ----------------------------------------------------
+        function renderCapitalJourney() {{
+            if (reportData.mode !== 'portfolio') return;
+            const sum = reportData.portfolio_summary;
+            document.getElementById('jrn-initial').innerText = '&#8377;' + Math.round(sum.initial_capital).toLocaleString('en-IN');
+            document.getElementById('jrn-final').innerText   = '&#8377;' + Math.round(sum.final_equity).toLocaleString('en-IN');
+            const equityByDate = {{}};
+            reportData.equity_curve.forEach(e => {{ equityByDate[e.date] = e.val; }});
+            const filledTrades = reportData.trades
+                .filter(t => t.status !== 'PENDING' && t.fill_date)
+                .sort((a, b) => a.fill_date.localeCompare(b.fill_date));
+            let totalDeployed = 0, totalProfit = 0;
+            filledTrades.forEach(t => {{
+                totalDeployed += (t.shares || 0) * t.entry_price;
+                totalProfit   += (t.pnl_cash || 0);
+            }});
+            document.getElementById('jrn-deployed').innerText = '&#8377;' + Math.round(totalDeployed).toLocaleString('en-IN');
+            const profitEl = document.getElementById('jrn-profit');
+            profitEl.innerText = (totalProfit >= 0 ? '+' : '') + '&#8377;' + Math.round(Math.abs(totalProfit)).toLocaleString('en-IN');
+            profitEl.className = 'text-xl font-bold mt-2 ' + (totalProfit >= 0 ? 'text-green-400' : 'text-red-400');
+            
+            // Render Trade Timeline Table
+            const tbody = document.getElementById('journey-table-body');
+            tbody.innerHTML = '';
+            let cumPnl = 0;
+            filledTrades.forEach((t, idx) => {{
+                const invested = (t.shares || 0) * t.entry_price;
+                const pnlCash  = t.pnl_cash || 0;
+                cumPnl += pnlCash;
+                const portVal  = equityByDate[t.fill_date];
+                const pnlCls   = t.pnl_pct >= 0 ? 'text-green-400' : 'text-red-400';
+                const cumCls   = cumPnl >= 0 ? 'text-green-400' : 'text-red-400';
+                let bdg = '';
+                if (t.status === 'COMPLETED') bdg = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-900/30 text-green-400 border border-green-800/40">DONE</span>';
+                else bdg = '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-900/30 text-blue-400 border border-blue-800/40">OPEN</span>';
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-800/40 transition duration-150';
+                tr.innerHTML = `
+                    <td class="px-4 py-3 text-gray-500 text-xs font-mono">${{idx + 1}}</td>
+                    <td class="px-4 py-3 text-gray-300 text-xs">${{t.fill_date}}</td>
+                    <td class="px-4 py-3 font-bold text-white">${{t.ticker}}</td>
+                    <td class="px-4 py-3 text-blue-300 text-xs font-mono">&#8377;${{Math.round(invested).toLocaleString('en-IN')}}</td>
+                    <td class="px-4 py-3 text-gray-300 text-xs">&#8377;${{t.entry_price.toFixed(2)}}</td>
+                    <td class="px-4 py-3 text-gray-300 text-xs">${{t.exit_date || (t.status === 'OPEN' ? 'Active' : '&mdash;')}}</td>
+                    <td class="px-4 py-3 text-gray-300 text-xs">${{t.exit_price ? '&#8377;' + t.exit_price.toFixed(2) : '&mdash;'}}</td>
+                    <td class="px-4 py-3 text-xs font-semibold ${{pnlCls}}">${{t.pnl_pct >= 0 ? '+' : ''}}${{t.pnl_pct.toFixed(2)}}%</td>
+                    <td class="px-4 py-3 text-xs font-semibold ${{pnlCls}}">${{pnlCash >= 0 ? '+' : ''}}&#8377;${{Math.round(Math.abs(pnlCash)).toLocaleString('en-IN')}}</td>
+                    <td class="px-4 py-3 text-xs text-gray-400 font-mono">${{portVal ? '&#8377;' + Math.round(portVal).toLocaleString('en-IN') : '&mdash;'}}</td>
+                    <td class="px-4 py-3 text-xs font-semibold ${{cumCls}}">${{cumPnl >= 0 ? '+' : ''}}&#8377;${{Math.round(Math.abs(cumPnl)).toLocaleString('en-IN')}}</td>
+                    <td class="px-4 py-3">${{bdg}}</td>
+                `;
+                tbody.appendChild(tr);
             }});
 
-            // Re-apply sorting
-            applySorting();
-            renderTradesTable();
-        }}
-
-        function sortTrades(colName) {{
-            if (sortedColumn === colName) {{
-                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-            }} else {{
-                sortedColumn = colName;
-                sortDirection = 'asc';
-            }}
-            applySorting();
-            renderTradesTable();
-        }}
-
-        function applySorting() {{
-            currentTrades.sort((a, b) => {{
-                let valA = a[sortedColumn];
-                let valB = b[sortedColumn];
-
-                // Deal with null/undefined values
-                if (valA === null || valA === undefined) return sortDirection === 'asc' ? 1 : -1;
-                if (valB === null || valB === undefined) return sortDirection === 'asc' ? -1 : 1;
-
-                if (typeof valA === 'string') {{
-                    return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-                }} else {{
-                    return sortDirection === 'asc' ? valA - valB : valB - valA;
-                }}
+            // Render Transaction Ledger Table
+            const tbodyLedger = document.getElementById('ledger-table-body');
+            tbodyLedger.innerHTML = '';
+            const ledger = reportData.ledger || [];
+            ledger.forEach((tx, idx) => {{
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-800/40 transition duration-150 border-t border-gray-800/60';
+                
+                const typeBdg = tx.type === 'BUY' 
+                    ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-900/30 text-green-400 border border-green-800/40">BUY</span>'
+                    : '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-900/30 text-red-400 border border-red-800/40">SELL</span>';
+                    
+                const amountVal = tx.amount;
+                const pnlCash = tx.pnl_cash || 0;
+                const pnlPct = tx.pnl_pct || 0;
+                const pnlCls = pnlCash >= 0 ? 'text-green-400' : 'text-red-400';
+                const pnlStr = tx.type === 'SELL'
+                    ? `${{pnlCash >= 0 ? '+' : ''}}&#8377;${{Math.round(Math.abs(pnlCash)).toLocaleString('en-IN')}} (${{pnlPct >= 0 ? '+' : ''}}${{pnlPct.toFixed(2)}}%)`
+                    : '&mdash;';
+                
+                tr.innerHTML = `
+                    <td class="px-4 py-2.5 text-gray-500 text-xs font-mono">${{idx + 1}}</td>
+                    <td class="px-4 py-2.5 text-gray-300 text-xs">${{tx.date}}</td>
+                    <td class="px-4 py-2.5 text-xs">${{typeBdg}}</td>
+                    <td class="px-4 py-2.5 font-bold text-white">${{tx.ticker}}</td>
+                    <td class="px-4 py-2.5 text-gray-400 text-xs font-mono">${{tx.shares.toFixed(1)}}</td>
+                    <td class="px-4 py-2.5 text-gray-300 text-xs">&#8377;${{tx.price.toFixed(2)}}</td>
+                    <td class="px-4 py-2.5 text-blue-300 text-xs font-mono">&#8377;${{Math.round(amountVal).toLocaleString('en-IN')}}</td>
+                    <td class="px-4 py-2.5 text-xs font-semibold ${{pnlCls}}">${{pnlStr}}</td>
+                    <td class="px-4 py-2.5 text-gray-400 text-xs font-mono">&#8377;${{Math.round(tx.cash).toLocaleString('en-IN')}}</td>
+                    <td class="px-4 py-2.5 text-emerald-400 text-xs font-semibold font-mono">&#8377;${{Math.round(tx.equity).toLocaleString('en-IN')}}</td>
+                `;
+                tbodyLedger.appendChild(tr);
             }});
         }}
     </script>

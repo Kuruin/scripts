@@ -164,11 +164,18 @@ class BacktestEngine:
         self,
         data_dict: Dict[str, pd.DataFrame],
         strategy,
-        max_active_trades: int = 10
+        max_active_trades: int = 9999,
+        risk_pct: float = 3.0
     ) -> Dict[str, Any]:
         """
         Simulates realistic portfolio trading day-by-day.
-        Allocates equal weight (1 / max_active_trades) of capital per trade.
+        Allocates `risk_pct`% of current total portfolio equity per trade (compounding).
+        Profits from closed trades are added back to capital and used for future allocations.
+        New trades are opened as long as there is enough cash to allocate risk_pct%.
+        
+        Args:
+            max_active_trades: Hard cap on concurrent open positions (default: unlimited).
+            risk_pct: Percentage of current portfolio equity to allocate per trade (default 3%).
         """
         # Step 1: Align all data on a common calendar timeline
         # Get all unique trading dates across all stock datasets
@@ -201,9 +208,10 @@ class BacktestEngine:
         pending_orders: List[Dict[str, Any]] = []     # List of active limit orders
         completed_trades: List[Trade] = []
         equity_curve: List[Tuple[datetime, float]] = []
+        ledger: List[Dict[str, Any]] = []
         
-        # Max allocation budget per trade
-        fixed_allocation = self.initial_capital / max_active_trades
+        # risk_pct is applied to total portfolio equity at trade entry time (compounding)
+        alloc_fraction = risk_pct / 100.0
         
         for date in all_dates:
             # 1. Process exits for active positions first
@@ -237,6 +245,29 @@ class BacktestEngine:
                             pnl_cash=exit_val - (pos['shares'] * pos['entry_price'] * (1 + self.commission))
                         )
                         completed_trades.append(trade_obj)
+                        
+                        # Record exit in ledger
+                        open_val = sum(
+                            p['shares'] * (
+                                data_dict[p['ticker']].loc[date, 'Close']
+                                if date in data_dict[p['ticker']].index
+                                else p['entry_price']
+                            )
+                            for p in active_positions if p != pos
+                        )
+                        post_exit_equity = cash + open_val
+                        ledger.append({
+                            'date': date.strftime("%Y-%m-%d"),
+                            'type': 'SELL',
+                            'ticker': ticker,
+                            'shares': float(pos['shares']),
+                            'price': float(exit_price),
+                            'amount': float(exit_val),
+                            'pnl_cash': float(trade_obj.pnl_cash),
+                            'pnl_pct': float(trade_obj.pnl_pct),
+                            'cash': float(cash),
+                            'equity': float(post_exit_equity)
+                        })
                     else:
                         still_active.append(pos)
                 else:
@@ -264,15 +295,27 @@ class BacktestEngine:
                 # Limit orders can only be filled on dates *after* the trigger date
                 if date in df.index and date > order['trigger_date']:
                     row = df.loc[date]
-                    # Check if limit price touched and we have a slot available in portfolio
+                    # Check if limit price touched and we have cash available
                     if row['Low'] <= order['entry_limit'] and len(active_positions) < max_active_trades:
                         entry_price = min(order['entry_limit'], row['Open'])
                         entry_cost = entry_price * (1 + self.commission)
                         
-                        # Allocation size is capped by available cash or the standard slot size
-                        trade_cash_allocated = min(fixed_allocation, cash)
+                        # --- DYNAMIC COMPOUNDING ALLOCATION ---
+                        # Compute current total portfolio equity (cash + open positions at today's close)
+                        open_positions_value = sum(
+                            pos['shares'] * (
+                                data_dict[pos['ticker']].loc[date, 'Close']
+                                if date in data_dict[pos['ticker']].index
+                                else pos['entry_price']
+                            )
+                            for pos in active_positions
+                        )
+                        current_total_equity = cash + open_positions_value
                         
-                        if trade_cash_allocated >= 100.0:  # Avoid dust orders
+                        # Allocate risk_pct% of current equity, but only if we have enough cash to allocate the full 3% (avoiding dust/fractional positions)
+                        required_cash = alloc_fraction * current_total_equity
+                        if cash >= required_cash and required_cash >= 100.0:
+                            trade_cash_allocated = required_cash
                             shares = trade_cash_allocated / entry_cost
                             cash -= (shares * entry_cost)
                             
@@ -286,8 +329,22 @@ class BacktestEngine:
                                 'shares': shares,
                                 'initial_move_pct': order['initial_move_pct']
                             })
+                            
+                            # Record buy in ledger
+                            ledger.append({
+                                'date': date.strftime("%Y-%m-%d"),
+                                'type': 'BUY',
+                                'ticker': ticker,
+                                'shares': float(shares),
+                                'price': float(entry_price),
+                                'amount': float(shares * entry_price),
+                                'pnl_cash': 0.0,
+                                'pnl_pct': 0.0,
+                                'cash': float(cash),
+                                'equity': float(current_total_equity)
+                            })
                         else:
-                            # Not enough cash to execute the order, keep it pending
+                            # Not enough cash to execute the full 3% order, keep it pending
                             still_pending.append(order)
                     else:
                         # Order not filled or portfolio is full, keep it pending
@@ -359,7 +416,8 @@ class BacktestEngine:
         return {
             "trades": completed_trades,
             "equity_curve": equity_series,
-            "summary": summary
+            "summary": summary,
+            "ledger": ledger
         }
 
     def _calculate_aggregate_stats(self, trades: List[Trade]) -> Dict[str, Any]:
