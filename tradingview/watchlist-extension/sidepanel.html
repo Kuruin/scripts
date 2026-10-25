@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Watchlist</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="theme-init.js"></script>
+</head>
+<body>
+  <!-- Icon sprite (Lucide-style outline icons, one consistent set) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="i-updown" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+      <symbol id="i-list-plus" viewBox="0 0 24 24"><path d="M11 12H3M16 6H3M16 18H3M18 9v6M21 12h-6"/></symbol>
+      <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.17 6.81a2.82 2.82 0 0 0-3.98-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/></symbol>
+      <symbol id="i-heading" viewBox="0 0 24 24"><path d="M6 12h12M6 20V4M18 20V4"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></symbol>
+      <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4"/></symbol>
+      <symbol id="i-export" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"/></symbol>
+      <symbol id="i-az" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4M7 20V4M15 10V6.5a2.5 2.5 0 0 1 5 0V10M15 8h5M15 14h5l-5 6h5"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+      <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5M12 7v5l3 2"/></symbol>
+      <symbol id="i-mouse" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></symbol>
+      <symbol id="i-list-x" viewBox="0 0 24 24"><path d="M11 12H3M16 6H3M16 18H3M15 10l4 4M19 10l-4 4"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.98 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.77 9.79z"/></symbol>
+      <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></symbol>
+      <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/></symbol>
+      <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-candles" viewBox="0 0 48 48"><path d="M6 6v36h36"/><path d="M18 13v5M18 30v5"/><rect x="14.5" y="18" width="7" height="12" rx="2"/><path d="M31 8v4M31 26v5"/><rect x="27.5" y="12" width="7" height="14" rx="2"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="hdr">
+    <div class="list-pick" id="listPick">
+      <button id="listColor" class="list-color" title="Change list color"></button>
+      <button id="listName" class="list-name" title="Switch list" aria-haspopup="listbox">
+        <span id="listNameText" class="list-name-text">Default</span>
+        <svg class="ic list-chev"><use href="#i-updown"/></svg>
+      </button>
+    </div>
+    <button id="filterBtn" class="icon-btn" title="Filter this list (Ctrl+F)"><svg class="ic"><use href="#i-search"/></svg></button>
+    <button id="addBtn" class="icon-btn" title="Add symbol (or start typing)"><svg class="ic"><use href="#i-plus"/></svg></button>
+    <div class="menu-wrap">
+      <button id="menuBtn" class="icon-btn" title="More"><svg class="ic"><use href="#i-more"/></svg></button>
+      <div id="menu" class="menu pop" hidden>
+        <div class="menu-label">List</div>
+        <button data-act="newList"><svg class="ic"><use href="#i-list-plus"/></svg>New list</button>
+        <button data-act="addSection" id="sectionBtn"><svg class="ic"><use href="#i-heading"/></svg>Add section</button>
+        <hr>
+        <div class="menu-label">Symbols</div>
+        <button data-act="import"><svg class="ic"><use href="#i-import"/></svg>Import from file</button>
+        <button data-act="export"><svg class="ic"><use href="#i-export"/></svg>Export for TradingView</button>
+        <button data-act="copy"><svg class="ic"><use href="#i-copy"/></svg>Copy symbols</button>
+        <div class="menu-row">
+          <span class="menu-row-label">Sort</span>
+          <div class="seg">
+            <button data-act="sortAZ" title="A to Z"><svg class="ic"><use href="#i-az"/></svg></button>
+            <button data-act="sortNew" title="Newest first"><svg class="ic"><use href="#i-clock"/></svg></button>
+            <button data-act="sortOld" title="Oldest first"><svg class="ic"><use href="#i-history"/></svg></button>
+          </div>
+        </div>
+        <hr>
+        <div class="menu-row">
+          <span class="menu-row-label">Theme</span>
+          <div class="seg" id="themeSeg">
+            <button data-theme="system" title="Match TradingView"><svg class="ic"><use href="#i-auto"/></svg></button>
+            <button data-theme="light" title="Light"><svg class="ic"><use href="#i-sun"/></svg></button>
+            <button data-theme="dark" title="Dark"><svg class="ic"><use href="#i-moon"/></svg></button>
+          </div>
+        </div>
+        <button data-act="wheel" class="toggle" id="wheelToggle"><svg class="ic"><use href="#i-mouse"/></svg><span class="grow">Scroll switches chart</span><span class="sw"></span></button>
+        <hr>
+        <button data-act="clear" class="danger"><svg class="ic"><use href="#i-list-x"/></svg>Remove all symbols</button>
+      </div>
+    </div>
+    <button id="closeBtn" class="icon-btn" title="Close watchlist"><svg class="ic"><use href="#i-x"/></svg></button>
+    <div id="listMenu" class="list-menu pop" hidden></div>
+  </header>
+
+  <div id="searchRow" class="search-row" hidden>
+    <svg class="ic search-ic"><use href="#i-search"/></svg>
+    <input id="searchInput" type="search" placeholder="Filter by symbol, name or note" spellcheck="false">
+    <span id="filterCount" class="filter-count" hidden></span>
+  </div>
+
+  <main id="viewport" class="viewport" tabindex="0">
+    <div id="spacer" class="spacer"></div>
+    <div id="rows" class="rows"></div>
+    <div id="empty" class="empty" hidden>
+      <svg class="empty-ic"><use href="#i-candles"/></svg>
+      <p class="empty-title">This list is empty</p>
+      <p class="empty-hint"></p>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <span id="footDot" class="dot"></span>
+    <span id="footText" class="foot-text">Connecting</span>
+    <span id="count" class="count">0</span>
+    <button id="footBtn" class="foot-btn" hidden>Open chart</button>
+  </footer>
+
+  <!-- Symbol search -->
+  <section id="ss" class="ss" hidden>
+    <div class="ss-head">
+      <span class="ss-title">Add symbol</span>
+      <span id="ssTarget" class="ss-target"></span>
+      <button id="ssClose" class="icon-btn sm" title="Close (Esc)"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="ss-input">
+      <svg class="ic ss-input-ic"><use href="#i-search"/></svg>
+      <input id="ssInput" type="text" placeholder="Symbol, ISIN, or CUSIP" spellcheck="false" autocomplete="off">
+      <button id="ssClear" class="ss-clear" title="Clear" hidden><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="ssTabs" class="ss-tabs"></div>
+    <div id="ssBar" class="ss-bar"></div>
+    <div id="ssResults" class="ss-results"></div>
+    <div class="ss-foot"><kbd>↵</kbd> add <kbd>↑</kbd><kbd>↓</kbd> move <kbd>Esc</kbd> close</div>
+  </section>
+
+  <div id="flagPop" class="flag-pop pop" hidden></div>
+
+  <div id="dlg" class="dlg" hidden>
+    <form id="dlgForm" class="dlg-box">
+      <p id="dlgTitle" class="dlg-title"></p>
+      <p id="dlgMsg" class="dlg-msg"></p>
+      <input id="dlgInput" type="text" spellcheck="false" autocomplete="off">
+      <div class="dlg-btns">
+        <button type="button" id="dlgCancel" class="btn ghost">Cancel</button>
+        <button type="submit" id="dlgOk" class="btn">OK</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <input id="fileInput" type="file" accept=".txt,.csv,text/plain" hidden>
+
+  <script src="tv.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
