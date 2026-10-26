@@ -34,7 +34,7 @@ Each row shows the ticker on the left and the price over its change (points and 
 - Click **+**, or start typing anywhere in the dock, to open symbol search. It uses TradingView's own search, with logos, exchange, type and category tabs. **Enter** adds the highlighted result; the search stays open for the next one.
 - Type or paste several symbols (`AAPL, MSFT, NSE:TCS`) to add them all at once. A pasted TradingView export keeps its sections.
 - **Import from file** (⋯ menu) reads a `.txt` or `.csv`, including TradingView's export format. You can also drag a file onto the dock.
-- Everything typed, pasted or imported is checked against TradingView. Tickers without an exchange (`SSWL`) are matched to the right one, preferring the exchange your other symbols use. Anything TradingView doesn't list is taken back out, and a popup says which symbols weren't added. Duplicates and a full list are reported too.
+- Everything typed, pasted or imported is checked against TradingView. Tickers without an exchange (`SSWL`) are matched to the right one, preferring the exchange your other symbols use. Tickers written with a dash are matched to TradingView's spelling (`NSE:BAJAJ-AUTO` becomes `NSE:BAJAJ_AUTO`). Anything TradingView doesn't list is taken back out, and a popup says how many weren't added, with a **Copy** button to copy them. Duplicates and a full list are reported too.
 
 ### Lists, sections and tags
 

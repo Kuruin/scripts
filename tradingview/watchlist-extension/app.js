@@ -301,6 +301,8 @@ const plural = (n, word) => `${nf(0).format(n)} ${word}${n === 1 ? '' : 's'}`;
 // are added. Bare tickers get their exchange; anything TradingView doesn't list
 // is taken back out and reported, so the list never holds dead rows.
 const validating = new Set();
+// TradingView writes dashes in tickers as underscores: NSE:BAJAJ-AUTO is NSE:BAJAJ_AUTO.
+const tvSpelling = (s) => s.replace(/-/g, '_');
 async function validateAdded(syms) {
   if (!syms || !syms.length) return { failed: [], stopped: false };
   const target = data.active;
@@ -319,9 +321,15 @@ async function validateAdded(syms) {
     for (let i = 0; i < full.length; i += 200) {
       if (limited()) { stopped = true; break; }
       const chunk = full.slice(i, i + 200);
-      const got = new Set((await TV.quotes(chunk, { session: data.session })).map((q) => q.sym));
-      chunk.forEach((s) => { if (!got.has(s)) notFound.push(s); });
-      tick(chunk.length - chunk.filter((s) => !got.has(s)).length);
+      const ask = [...new Set(chunk.concat(chunk.map(tvSpelling)))];
+      const got = new Set((await TV.quotes(ask, { session: data.session })).map((q) => q.sym));
+      let ok = 0;
+      for (const s of chunk) {
+        if (got.has(s)) ok++;
+        else if (got.has(tvSpelling(s))) { renameSymbol(s, tvSpelling(s)); renamed++; ok++; }
+        else notFound.push(s);
+      }
+      tick(ok);
       await pause(SEARCH_GAP);
     }
     // The price service doesn't carry every instrument; confirm with symbol search before rejecting.
@@ -329,7 +337,9 @@ async function validateAdded(syms) {
       if (stopped || limited()) { stopped = true; break; }
       const { exch, ticker } = splitSymbol(s);
       const res = await TV.search(ticker, '', exch, { session: data.session });
-      if (!res.some((r) => r.id === s)) failed.push(s);
+      const hit = res.find((r) => r.id === s || r.id === tvSpelling(s));
+      if (!hit) failed.push(s);
+      else if (hit.id !== s) { renameSymbol(s, hit.id, hit.logos[0]); renamed++; }
       tick(1);
       await pause(SEARCH_GAP);
     }
@@ -337,7 +347,7 @@ async function validateAdded(syms) {
     for (const s of bare) {
       if (stopped || limited()) { stopped = true; break; }
       const res = await TV.search(s, '', '', { session: data.session });
-      const exact = res.filter((r) => r.ticker.toUpperCase() === s);
+      const exact = res.filter((r) => r.ticker.toUpperCase() === s || r.ticker.toUpperCase() === tvSpelling(s));
       const pick = (pref && exact.find((r) => r.id.startsWith(pref + ':'))) || exact[0];
       if (pick) { renameSymbol(s, pick.id, pick.logos[0]); renamed++; }
       else failed.push(s);
@@ -355,6 +365,19 @@ async function validateAdded(syms) {
   if (failed.length) removeSymbols(failed, target);
   if (renamed || failed.length) { scheduleSave(); refresh(); }
   return { failed, stopped };
+}
+
+// Copy symbols as "A, B, C" and confirm on the button itself.
+async function copyList(list, btn) {
+  const label = btn.innerHTML;
+  try {
+    await navigator.clipboard.writeText(list.join(', '));
+    btn.innerHTML = `${ico('check')}<span>Copied</span>`;
+    btn.classList.add('done');
+  } catch {
+    btn.innerHTML = `<span>Couldn't copy</span>`;
+  }
+  setTimeout(() => { btn.innerHTML = label; btn.classList.remove('done'); }, 1500);
 }
 
 // Add typed / pasted / imported symbols, check them, then show one accurate result.
@@ -378,9 +401,11 @@ async function addAndValidate(entries) {
     const names = failed.map((x) => tickerOf(x));
     toast(failed.length === 1 ? `${names[0]} wasn't added` : `${failed.length} symbols weren't added`, {
       type: 'error',
+      duration: 12000,
       description: failed.length === 1
         ? "TradingView doesn't list it. Check the ticker and exchange."
-        : `TradingView doesn't list ${names.slice(0, 3).join(', ')}${failed.length > 3 ? ` and ${failed.length - 3} more` : ''}.`,
+        : "TradingView doesn't list these. Check the tickers and exchanges.",
+      action: { label: failed.length === 1 ? 'Copy symbol' : `Copy ${failed.length} symbols`, icon: 'copy', onClick: (btn) => copyList(failed, btn) },
     });
   }
 }
@@ -706,7 +731,7 @@ async function resolveBareSymbols() {
     let res;
     try { res = await TV.search(sym, '', '', { session: data.session }); }
     catch (e) { if (e instanceof TV.RateLimited) hitLimit(); break; }   // try again later
-    const exact = res.filter((r) => r.ticker.toUpperCase() === sym);
+    const exact = res.filter((r) => r.ticker.toUpperCase() === sym || r.ticker.toUpperCase() === tvSpelling(sym));
     const pick = (pref && exact.find((r) => r.id.startsWith(pref + ':'))) || exact[0];
     if (pick) { renameSymbol(sym, pick.id, pick.logos[0]); fixed++; sinceRender++; }
     else {
@@ -1302,7 +1327,7 @@ const TOAST_VISIBLE = 3;
 const toasts = [];             // newest first
 let toastsExpanded = false;
 
-function toast(title, { type = 'default', description = '', duration } = {}) {
+function toast(title, { type = 'default', description = '', duration, items = null, action = null } = {}) {
   const t = {
     el: document.createElement('li'),
     remaining: duration ?? (type === 'error' ? 6000 : 2400),
@@ -1317,6 +1342,27 @@ function toast(title, { type = 'default', description = '', duration } = {}) {
   t.el.querySelector('.tst-title').textContent = title;
   const d = t.el.querySelector('.tst-desc');
   if (description) d.textContent = description; else d.remove();
+  const body = t.el.querySelector('.tst-body');
+  if (items && items.length) {
+    // Every item, as chips; a long list scrolls inside the toast.
+    const box = document.createElement('div');
+    box.className = 'tst-items';
+    for (const it of items) {
+      const chip = document.createElement('span');
+      chip.className = 'tst-chip';
+      chip.textContent = it;
+      box.appendChild(chip);
+    }
+    body.appendChild(box);
+  }
+  if (action) {
+    const btn = document.createElement('button');
+    btn.className = 'tst-btn';
+    btn.innerHTML = `${action.icon ? ico(action.icon) : ''}<span>${esc(action.label)}</span>`;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); action.onClick(btn, t); });
+    btn.addEventListener('pointerdown', (e) => e.stopPropagation());   // not a swipe
+    body.appendChild(btn);
+  }
   t.el.querySelector('.tst-x').addEventListener('click', () => dismissToast(t));
   swipeToDismiss(t);
 
