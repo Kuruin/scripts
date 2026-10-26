@@ -1,0 +1,73 @@
+# Zips the Watchlist extension and publishes it under GitHub Releases.
+#
+# Runs when a push to main changes the extension. It reads the version from
+# manifest.json and, if there's no release for that version yet, creates
+# tag watchlist-v<version> with the zip attached. Pushes that don't bump the
+# version do nothing, so: bump "version" in manifest.json to ship.
+# Can also be run by hand from the Actions tab.
+name: Release Watchlist extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tradingview/watchlist-extension/**'
+      - '.github/workflows/watchlist-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create tags and releases
+
+concurrency:
+  group: watchlist-release
+  cancel-in-progress: false
+
+env:
+  EXT_DIR: tradingview/watchlist-extension
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: meta
+        run: |
+          version=$(jq -r .version "$EXT_DIR/manifest.json")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=watchlist-v$version" >> "$GITHUB_OUTPUT"
+          echo "zip=watchlist-$version.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if this version is already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.meta.outputs.tag }} already exists; bump the version in manifest.json to publish a new one."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build zip
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          cd "$EXT_DIR"
+          # manifest.json at the zip's root, as Chrome expects. Leave out
+          # development-only files (design skills, git files, old zips).
+          zip -r -X "$GITHUB_WORKSPACE/${{ steps.meta.outputs.zip }}" . \
+            -x '.agents/*' 'skills-lock.json' '.git*' '*.zip' '_metadata/*' 'dev/*' 'prototypes/*'
+          unzip -l "$GITHUB_WORKSPACE/${{ steps.meta.outputs.zip }}"
+
+      - name: Publish release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.meta.outputs.tag }}" "${{ steps.meta.outputs.zip }}" \
+            --target "$GITHUB_SHA" \
+            --title "Watchlist ${{ steps.meta.outputs.version }}" \
+            --generate-notes \
+            --notes "Install: download ${{ steps.meta.outputs.zip }}, unzip it, open chrome://extensions, turn on Developer mode, click **Load unpacked** and pick the unzipped folder."
