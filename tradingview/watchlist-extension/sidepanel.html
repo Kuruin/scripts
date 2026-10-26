@@ -54,13 +54,13 @@
       <button id="menuBtn" class="icon-btn" title="More"><svg class="ic"><use href="#i-more"/></svg></button>
       <div id="menu" class="menu pop" hidden>
         <div class="menu-label">List</div>
-        <button data-act="newList"><svg class="ic"><use href="#i-list-plus"/></svg>New list</button>
-        <button data-act="addSection" id="sectionBtn"><svg class="ic"><use href="#i-heading"/></svg>Add section</button>
+        <button data-act="newList"><svg class="ic"><use href="#i-list-plus"/></svg><span class="ml">New list</span></button>
+        <button data-act="addSection" id="sectionBtn"><svg class="ic"><use href="#i-heading"/></svg><span class="ml">Add section</span></button>
         <hr>
         <div class="menu-label">Symbols</div>
-        <button data-act="import"><svg class="ic"><use href="#i-import"/></svg>Import from file</button>
-        <button data-act="export"><svg class="ic"><use href="#i-export"/></svg>Export for TradingView</button>
-        <button data-act="copy"><svg class="ic"><use href="#i-copy"/></svg>Copy symbols</button>
+        <button data-act="import"><svg class="ic"><use href="#i-import"/></svg><span class="ml">Import from file</span></button>
+        <button data-act="export"><svg class="ic"><use href="#i-export"/></svg><span class="ml">Export for TradingView</span></button>
+        <button data-act="copy"><svg class="ic"><use href="#i-copy"/></svg><span class="ml">Copy symbols</span></button>
         <div class="menu-row">
           <span class="menu-row-label">Sort</span>
           <div class="seg">
@@ -87,10 +87,10 @@
             <button data-refresh="0" title="Only when you press sync">Off</button>
           </div>
         </div>
-        <button data-act="session" class="toggle" id="sessionToggle" title="Fetch prices through your TradingView tab, with your login. Real-time where your TradingView plan includes it."><svg class="ic"><use href="#i-refresh"/></svg><span class="grow">Use my TradingView login</span><span class="sw"></span></button>
-        <button data-act="wheel" class="toggle" id="wheelToggle"><svg class="ic"><use href="#i-mouse"/></svg><span class="grow">Scroll switches chart</span><span class="sw"></span></button>
+        <button data-act="session" class="toggle" id="sessionToggle" title="Fetch prices through your TradingView tab, with your login. Real-time where your TradingView plan includes it."><svg class="ic"><use href="#i-refresh"/></svg><span class="ml grow">Use my TradingView login</span><span class="sw"></span></button>
+        <button data-act="wheel" class="toggle" id="wheelToggle"><svg class="ic"><use href="#i-mouse"/></svg><span class="ml grow">Scroll switches chart</span><span class="sw"></span></button>
         <hr>
-        <button data-act="clear" class="danger"><svg class="ic"><use href="#i-list-x"/></svg>Remove all symbols</button>
+        <button data-act="clear" class="danger"><svg class="ic"><use href="#i-list-x"/></svg><span class="ml">Remove all symbols</span></button>
       </div>
     </div>
     <button id="closeBtn" class="icon-btn" title="Close watchlist"><svg class="ic"><use href="#i-x"/></svg></button>
@@ -134,7 +134,11 @@
       <input id="ssInput" type="text" placeholder="Symbol, ISIN, or CUSIP" spellcheck="false" autocomplete="off">
       <button id="ssClear" class="ss-clear" title="Clear" hidden><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
-    <div id="ssTabs" class="ss-tabs"></div>
+    <div id="ssTabsWrap" class="ss-tabs-wrap">
+      <button id="ssTabsPrev" class="ss-tabs-btn prev" tabindex="-1" aria-label="Show previous categories"><svg class="ic"><use href="#i-chev"/></svg></button>
+      <div id="ssTabs" class="ss-tabs"></div>
+      <button id="ssTabsNext" class="ss-tabs-btn next" tabindex="-1" aria-label="Show more categories"><svg class="ic"><use href="#i-chev"/></svg></button>
+    </div>
     <div id="ssBar" class="ss-bar"></div>
     <div id="ssResults" class="ss-results"></div>
     <div class="ss-foot"><kbd>↵</kbd> add <kbd>↑</kbd><kbd>↓</kbd> move <kbd>Esc</kbd> close</div>

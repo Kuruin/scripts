@@ -227,9 +227,11 @@ window.TV = (() => {
 
   // Searches run inside the TradingView tab with TradingView's real origin.
   // (The search service refuses requests from other origins.)
-  async function search(q, type, exchange, { session = true } = {}) {
+  // Never with cookies: the search service rejects credentialed cross-site requests
+  // (the browser reports "Failed to fetch"), and search results don't depend on login.
+  async function search(q, type, exchange) {
     const url = searchUrl(q, type, exchange);
-    const res = await viaTab(url, 'GET', null, session ? 'include' : 'omit');
+    const res = await viaTab(url, 'GET', null, 'omit');
     return (unwrap(res, 'search', true).symbols || []).map(normalize);
   }
 

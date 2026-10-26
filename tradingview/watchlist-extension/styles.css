@@ -424,3 +424,81 @@ html.embed .hdr { height: 40px; }
 .tst-x { width: 18px; height: 18px; border: 0; border-radius: 4px; padding: 0; background: transparent; color: var(--text-3); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .tst-x .ic { width: 12px; height: 12px; }
 .tst-x:hover { color: var(--text); background: var(--bg-3); }
+
+/* ---------- responsive popups ----------
+   The dock can be anything from 150px to 520px wide, and any height. Every
+   popup sizes to the dock, wraps long labels instead of clipping them, and
+   scrolls when the dock is short. */
+.menu { width: min(240px, calc(100vw - 8px)); container-type: inline-size; overscroll-behavior: contain; }
+.menu > button, .menu .toggle { height: auto; min-height: 30px; padding-top: 5px; padding-bottom: 5px; white-space: normal; }
+.menu .ml { flex: 1 1 auto; min-width: 0; line-height: 1.25; overflow-wrap: anywhere; }
+.menu .sw { align-self: center; }
+.menu-row { flex-wrap: wrap; row-gap: 4px; }
+.menu-row-label { flex: 1 0 auto; }
+@container (max-width: 210px) {
+  .menu-row { flex-direction: column; align-items: stretch; padding-right: 8px; }
+  .menu-row .seg { display: flex; }
+  .menu-row .seg button { flex: 1 1 0; min-width: 0; width: auto; padding: 0; }
+  .menu > button, .menu .toggle { gap: 8px; }
+}
+.list-menu { max-height: calc(100vh - 48px); overscroll-behavior: contain; }
+.lm-name { overflow-wrap: anywhere; }
+.flag-pop { flex-wrap: wrap; max-width: calc(100vw - 8px); justify-content: center; }
+.dlg { padding-top: min(64px, 12vh); overflow-y: auto; }
+.dlg-box { max-height: calc(100vh - 24px); overflow-y: auto; }
+.dlg-title, .dlg-msg { overflow-wrap: anywhere; }
+.dlg-btns { flex-wrap: wrap; }
+.ss-head { min-width: 0; }
+.ss-results { overscroll-behavior: contain; }
+/* Category chips scroll sideways; fade the edge so it's clear there are more. */
+.toaster { left: 6px; right: 6px; }
+.tst { max-height: 40vh; overflow-y: auto; }
+@media (max-height: 360px) {
+  .menu, .list-menu { max-height: calc(100vh - 44px); }
+  .empty-ic { display: none; }
+  .ss-foot { display: none; }
+}
+
+/* Items keep their natural height; the menu scrolls instead of squashing them. */
+.menu > *, .list-menu > * { flex-shrink: 0; }
+
+/* ---------- category slider ---------- */
+.ss-tabs-wrap { position: relative; flex: 0 0 auto; }
+.ss-tabs { scroll-behavior: auto; cursor: grab; }
+.ss-tabs.dragging { cursor: grabbing; user-select: none; }
+.ss-tabs.dragging .chip { pointer-events: none; }
+/* Fade only the edge that has more chips behind it. */
+.ss-tabs-wrap.can-next .ss-tabs { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent calc(100% - 8px)); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent calc(100% - 8px)); }
+.ss-tabs-wrap.can-prev .ss-tabs { -webkit-mask-image: linear-gradient(to right, transparent 8px, #000 40px); mask-image: linear-gradient(to right, transparent 8px, #000 40px); }
+.ss-tabs-wrap.can-prev.can-next .ss-tabs { -webkit-mask-image: linear-gradient(to right, transparent 8px, #000 40px, #000 calc(100% - 40px), transparent calc(100% - 8px)); mask-image: linear-gradient(to right, transparent 8px, #000 40px, #000 calc(100% - 40px), transparent calc(100% - 8px)); }
+.ss-tabs-btn {
+  position: absolute; top: 1px; z-index: 1; width: 24px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 50%;
+  background: var(--pop); color: var(--text-2); display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25); opacity: 0; pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease, color 120ms ease;
+}
+.ss-tabs-btn .ic { width: 14px; height: 14px; }
+.ss-tabs-btn.prev { left: 4px; }
+.ss-tabs-btn.prev .ic { transform: rotate(90deg); }
+.ss-tabs-btn.next { right: 4px; }
+.ss-tabs-btn.next .ic { transform: rotate(-90deg); }
+.ss-tabs-wrap.can-prev .ss-tabs-btn.prev, .ss-tabs-wrap.can-next .ss-tabs-btn.next { opacity: 1; pointer-events: auto; }
+.ss-tabs-btn:hover { color: var(--text); background: var(--bg-3); }
+.ss-tabs-btn:active { transform: scale(0.92); }
+
+/* Exchange badge next to the ticker in search results (NSE, BSE, NASDAQ...). */
+.ss-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ss-line .ss-sym { flex: 0 1 auto; min-width: 0; }
+.ex-badge {
+  flex: 0 0 auto; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 0 4px; height: 15px; line-height: 13px; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg-2); color: var(--text-2); font-size: 9.5px; font-weight: 700; letter-spacing: .03em;
+}
+.ss-row.hl .ex-badge, .ss-row:hover .ex-badge { border-color: var(--text-3); }
+
+/* Exchange badge after the ticker in watchlist rows. */
+.sym-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sym-line .sym { flex: 0 1 auto; min-width: 0; }
+.row.current .ex-badge { border-color: var(--accent); color: var(--accent-ink); }
+
+.row.no-badge .sym-line .ex-badge { display: none; }

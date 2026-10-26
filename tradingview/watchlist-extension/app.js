@@ -170,7 +170,8 @@ const el = {
   viewport: $('viewport'), spacer: $('spacer'), rows: $('rows'), empty: $('empty'),
   footDot: $('footDot'), footText: $('footText'), count: $('count'), footBtn: $('footBtn'),
   ss: $('ss'), ssTarget: $('ssTarget'), ssClose: $('ssClose'), ssInput: $('ssInput'), ssClear: $('ssClear'),
-  ssTabs: $('ssTabs'), ssBar: $('ssBar'), ssResults: $('ssResults'),
+  ssTabs: $('ssTabs'), ssTabsWrap: $('ssTabsWrap'), ssTabsPrev: $('ssTabsPrev'), ssTabsNext: $('ssTabsNext'),
+  ssBar: $('ssBar'), ssResults: $('ssResults'),
   flagPop: $('flagPop'),
   dlg: $('dlg'), dlgForm: $('dlgForm'), dlgTitle: $('dlgTitle'), dlgMsg: $('dlgMsg'), dlgInput: $('dlgInput'),
   dlgOk: $('dlgOk'), dlgCancel: $('dlgCancel'),
@@ -646,7 +647,7 @@ function renderRows() {
       `<button class="flag${m.f ? ' set' : ''}" data-act="flag" title="${m.f ? 'In ' + TAG[m.f].name + ' list' : 'Tag this symbol'}">${bookmarkSvg(tagColor)}</button>` +
       avatarHtml(it.s, ticker, q) +
       `<span class="body">` +
-        `<span class="left"><span class="sym">${esc(ticker)}</span>${sub}</span>` +
+        `<span class="left"><span class="sym-line"><span class="sym">${esc(ticker)}</span>${exch ? `<span class="ex-badge" title="${esc(exch)}">${esc(exch)}</span>` : ''}</span>${sub}</span>` +
         `<span class="right">${priceHtml(q)}${chgHtml(q)}</span>` +
       `</span>` +
       `<button class="del" data-act="del" title="${src.kind === 'tag' ? 'Remove from ' + esc(src.name) : 'Remove'}">${ICON.del}</button>`;
@@ -732,8 +733,11 @@ async function resolveBareSymbols() {
 function fitRow(row) {
   const sym = row.querySelector('.sym');
   if (!sym) return;
-  row.classList.remove('tight');
-  if (sym.scrollWidth > sym.clientWidth + 1 && row.querySelector('.chg .abs')) row.classList.add('tight');
+  // The ticker comes first: drop the point change, then the exchange badge, until it fits.
+  const cut = () => sym.scrollWidth > sym.clientWidth + 1;
+  row.classList.remove('tight', 'no-badge');
+  if (cut() && row.querySelector('.chg .abs')) row.classList.add('tight');
+  if (cut() && row.querySelector('.sym-line .ex-badge')) row.classList.add('no-badge');
 }
 
 /* ---------- logos ---------- */
@@ -1058,6 +1062,7 @@ function openSearch(q = '', { instant = false } = {}) {
   el.ssTarget.textContent = 'to ' + src.name;
   el.ssInput.value = q;
   renderTabs();
+  updateTabArrows();
   runSearch();
   el.ssInput.focus();
   el.ssInput.setSelectionRange(q.length, q.length);
@@ -1068,6 +1073,8 @@ function closeSearch() {
 }
 function renderTabs() {
   el.ssTabs.innerHTML = SEARCH_TYPES.map(([id, label]) => `<button class="chip${id === ssType ? ' on' : ''}" data-type="${id}">${label}</button>`).join('');
+  updateTabArrows();
+  requestAnimationFrame(updateTabArrows);
 }
 
 async function runSearch() {
@@ -1109,6 +1116,9 @@ function logoHtml(r) {
   return `<span class="ss-logo${r.logos.length > 1 ? ' pair' : ''}" style="${hue}">${letter}${imgs}</span>`;
 }
 
+// Short exchange code for the badge: the symbol's prefix (NSE, BSE, NASDAQ, BINANCE...).
+const exchCode = (r) => (r.id.includes(':') ? r.id.slice(0, r.id.indexOf(':')) : String(r.exch || '')).toUpperCase();
+
 function renderResults() {
   if (ssState !== 'loading') el.ssBar.classList.remove('loading');
   const q = esc(el.ssInput.value.trim().toUpperCase());
@@ -1130,8 +1140,10 @@ function renderResults() {
       return (
         `<div class="ss-row${i === ssHl ? ' hl' : ''}${added ? ' added' : ''}" data-i="${i}" title="${esc(r.id)}">` +
         logoHtml(r) +
-        `<span class="ss-text"><span class="ss-sym">${hlHtml(r.symHtml)}</span><span class="ss-desc">${hlHtml(r.descHtml)}</span></span>` +
-        `<span class="ss-meta"><span class="ss-ex">${esc(r.exch)}${flag}</span><span class="ss-type">${esc(TYPE_LABEL[r.type] || r.type)}</span></span>` +
+        `<span class="ss-text"><span class="ss-line"><span class="ss-sym">${hlHtml(r.symHtml)}</span>` +
+        `<span class="ex-badge" title="${esc(r.exch)}">${esc(exchCode(r))}</span></span>` +
+        `<span class="ss-desc">${hlHtml(r.descHtml)}</span></span>` +
+        `<span class="ss-meta">${flag ? `<span class="ss-ex">${flag}</span>` : ''}<span class="ss-type">${esc(TYPE_LABEL[r.type] || r.type)}</span></span>` +
         `<span class="ss-act">${added ? ICON.check : ICON.plus}</span></div>`
       );
     }).join('');
@@ -1168,6 +1180,20 @@ function moveHl(delta) {
   el.ssResults.querySelector(`.ss-row[data-i="${ssHl}"]`)?.scrollIntoView({ block: 'nearest' });
 }
 
+// Placeholder: the longest wording that fits the box, so it's never cut off.
+const SS_PLACEHOLDERS = ['Symbol, ISIN, or CUSIP', 'Symbol or ISIN', 'Symbol', 'Search'];
+const measureCtx = document.createElement('canvas').getContext('2d');
+function fitSearchPlaceholder() {
+  const inp = el.ssInput;
+  const cs = getComputedStyle(inp);
+  const room = inp.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 2;
+  if (room <= 0) return;
+  // Placeholder text is regular weight even though typed text is bold.
+  measureCtx.font = `400 ${cs.fontSize} ${cs.fontFamily}`;
+  inp.placeholder = SS_PLACEHOLDERS.find((t) => measureCtx.measureText(t).width <= room) || '';
+}
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(fitSearchPlaceholder).observe(el.ssInput);
+
 el.ssInput.addEventListener('input', () => {
   clearTimeout(ssTimer);
   ssTimer = setTimeout(() => { ssTimer = null; runSearch(); }, 160);
@@ -1194,6 +1220,51 @@ el.ssInput.addEventListener('paste', (e) => {
 });
 el.ssClear.addEventListener('click', () => { el.ssInput.value = ''; runSearch(); el.ssInput.focus(); });
 el.ssClose.addEventListener('click', closeSearch);
+/* Category slider: arrows and edge fades appear only when there's more to see
+   in that direction; the wheel scrolls sideways; the row can be dragged. */
+function updateTabArrows() {
+  const t = el.ssTabs;
+  const max = t.scrollWidth - t.clientWidth;
+  el.ssTabsWrap.classList.toggle('can-prev', t.scrollLeft > 2);
+  el.ssTabsWrap.classList.toggle('can-next', t.scrollLeft < max - 2);
+}
+function slideTabs(dir) {
+  el.ssTabs.scrollBy({ left: dir * Math.max(80, el.ssTabs.clientWidth * 0.7), behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
+el.ssTabsPrev.addEventListener('click', () => slideTabs(-1));
+el.ssTabsNext.addEventListener('click', () => slideTabs(1));
+el.ssTabs.addEventListener('scroll', updateTabArrows, { passive: true });
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(updateTabArrows).observe(el.ssTabs);
+el.ssTabs.addEventListener('wheel', (e) => {
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;   // trackpads already scroll sideways
+  e.preventDefault();
+  el.ssTabs.scrollLeft += e.deltaY;
+  updateTabArrows();
+}, { passive: false });
+// Drag to scroll; a real drag (more than 4px) doesn't count as a chip click.
+let tabDrag = null;
+el.ssTabs.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || e.pointerType === 'touch') return;
+  tabDrag = { x: e.clientX, left: el.ssTabs.scrollLeft, moved: false, id: e.pointerId };
+});
+el.ssTabs.addEventListener('pointermove', (e) => {
+  if (!tabDrag) return;
+  const dx = e.clientX - tabDrag.x;
+  if (!tabDrag.moved && Math.abs(dx) > 4) { tabDrag.moved = true; el.ssTabs.setPointerCapture(tabDrag.id); el.ssTabs.classList.add('dragging'); }
+  if (tabDrag.moved) { el.ssTabs.scrollLeft = tabDrag.left - dx; updateTabArrows(); }
+});
+const endTabDrag = () => {
+  if (!tabDrag) return;
+  if (tabDrag.moved) {
+    el.ssTabs.classList.remove('dragging');
+    // Swallow the click that follows a drag.
+    el.ssTabs.addEventListener('click', (ev) => { ev.stopPropagation(); ev.preventDefault(); }, { capture: true, once: true });
+  }
+  tabDrag = null;
+};
+el.ssTabs.addEventListener('pointerup', endTabDrag);
+el.ssTabs.addEventListener('pointercancel', endTabDrag);
+
 el.ssTabs.addEventListener('click', (e) => {
   const b = e.target.closest('.chip');
   if (!b) return;
