@@ -32,6 +32,7 @@
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.98 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.77 9.79z"/></symbol>
       <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></symbol>
       <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
       <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/></symbol>
       <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
@@ -77,6 +78,16 @@
             <button data-theme="dark" title="Dark"><svg class="ic"><use href="#i-moon"/></svg></button>
           </div>
         </div>
+        <div class="menu-row">
+          <span class="menu-row-label">Prices</span>
+          <div class="seg seg-text" id="refreshSeg">
+            <button data-refresh="5" title="Refresh every 5 seconds">5s</button>
+            <button data-refresh="15" title="Refresh every 15 seconds (recommended)">15s</button>
+            <button data-refresh="60" title="Refresh every minute">1m</button>
+            <button data-refresh="0" title="Only when you press sync">Off</button>
+          </div>
+        </div>
+        <button data-act="session" class="toggle" id="sessionToggle" title="Fetch prices through your TradingView tab, with your login. Real-time where your TradingView plan includes it."><svg class="ic"><use href="#i-refresh"/></svg><span class="grow">Use my TradingView login</span><span class="sw"></span></button>
         <button data-act="wheel" class="toggle" id="wheelToggle"><svg class="ic"><use href="#i-mouse"/></svg><span class="grow">Scroll switches chart</span><span class="sw"></span></button>
         <hr>
         <button data-act="clear" class="danger"><svg class="ic"><use href="#i-list-x"/></svg>Remove all symbols</button>
@@ -104,7 +115,9 @@
 
   <footer class="foot">
     <span id="footDot" class="dot"></span>
-    <span id="footText" class="foot-text">Connecting</span>
+    <span id="footText" class="foot-text" hidden></span>
+    <span id="priceWrap" class="price-wrap"><span id="priceState" class="price-state">Loading</span><span id="priceAgo" class="price-ago"></span></span>
+    <button id="syncBtn" class="sync-btn" title="Sync prices now"><svg class="ic"><use href="#i-refresh"/></svg></button>
     <span id="count" class="count">0</span>
     <button id="footBtn" class="foot-btn" hidden>Open chart</button>
   </footer>
@@ -141,7 +154,7 @@
     </form>
   </div>
 
-  <div id="toast" class="toast" hidden></div>
+  <ol id="toaster" class="toaster" aria-live="polite"></ol>
   <input id="fileInput" type="file" accept=".txt,.csv,text/plain" hidden>
 
   <script src="tv.js"></script>

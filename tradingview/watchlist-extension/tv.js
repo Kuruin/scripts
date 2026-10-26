@@ -141,14 +141,59 @@ window.TV = (() => {
     return SEARCH + '?' + p.toString();
   }
 
-  // Runs inside the TradingView page, so the request has TradingView's origin.
-  async function inPageFetch(url) {
+  // ---------- requests to TradingView ----------
+  // TradingView refused or throttled us: callers must back off, not retry.
+  class RateLimited extends Error {}
+
+  // Runs inside the TradingView page (MAIN world), so requests carry
+  // TradingView's own origin, and its login cookies when `creds` is 'include'.
+  // Must be self-contained: it is serialised into the page.
+  async function inPageRequest(url, method, body, creds) {
     try {
-      const r = await fetch(url, { credentials: 'include' });
-      return r.ok ? await r.json() : null;
+      const init = { method, credentials: creds };
+      if (body) { init.headers = { 'Content-Type': 'text/plain;charset=UTF-8' }; init.body = body; }
+      const r = await fetch(url, init);
+      let json = null;
+      if (r.ok) { try { json = await r.json(); } catch (e) {} }
+      return { status: r.status, json };
+    } catch (e) {
+      return { status: 0, json: null };
+    }
+  }
+
+  // Through the TradingView tab hosting the dock. null = no tab to use.
+  async function viaTab(url, method, body, creds) {
+    if (!available) return null;
+    try {
+      const tab = await findTab();
+      if (!tab || !isTV(tab.url)) return null;
+      return await run(tab.id, inPageRequest, [url, method, body, creds]);
     } catch (e) {
       return null;
     }
+  }
+
+  // From the extension itself (no cookies). null = network failure.
+  async function direct(url, method, body) {
+    try {
+      const init = { method, credentials: 'omit' };
+      if (body) { init.headers = { 'Content-Type': 'text/plain;charset=UTF-8' }; init.body = body; }
+      const r = await fetch(url, init);
+      let json = null;
+      if (r.ok) { try { json = await r.json(); } catch (e) {} }
+      return { status: r.status, json };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 429 / 503 always mean "slow down". From TradingView's own origin, 403 means blocked too.
+  function unwrap(res, what, fromTab) {
+    if (!res) throw new Error(what + ' unavailable');
+    const s = res.status;
+    if (s === 429 || s === 503 || (fromTab && s === 403)) throw new RateLimited(what + ' rate limited (' + s + ')');
+    if (!res.json) throw new Error(what + ' failed (' + s + ')');
+    return res.json;
   }
 
   function normalize(r) {
@@ -180,29 +225,12 @@ window.TV = (() => {
     };
   }
 
-  async function search(q, type, exchange) {
+  // Searches run inside the TradingView tab with TradingView's real origin.
+  // (The search service refuses requests from other origins.)
+  async function search(q, type, exchange, { session = true } = {}) {
     const url = searchUrl(q, type, exchange);
-    let json = null;
-    try {
-      const r = await fetch(url, { credentials: 'omit' });
-      if (r.ok) json = await r.json();
-    } catch (e) {}
-    // Fallback: ask any loaded TradingView tab (in any window) to run the search.
-    if (!json && available) {
-      const tabs = [];
-      try {
-        const own = await findTab();
-        if (own) tabs.push(own);
-        const all = await chrome.tabs.query({ url: '*://*.tradingview.com/*' });
-        for (const t of all) if (!tabs.some((x) => x.id === t.id) && !t.discarded) tabs.push(t);
-      } catch (e) {}
-      for (const t of tabs.slice(0, 3)) {
-        try { json = await run(t.id, inPageFetch, [url]); } catch (e) {}
-        if (json) break;
-      }
-    }
-    if (!json) throw new Error('Symbol search unavailable');
-    return (json.symbols || []).map(normalize);
+    const res = await viaTab(url, 'GET', null, session ? 'include' : 'omit');
+    return (unwrap(res, 'search', true).symbols || []).map(normalize);
   }
 
   // ---------- quotes (TradingView's scanner service) ----------
@@ -213,37 +241,22 @@ window.TV = (() => {
   const QUOTE_COLS = ['close', 'change', 'change_abs', 'description', 'pricescale', 'logoid',
     'base_currency_logoid', 'currency_logoid', 'type', 'update_mode'];
 
-  // Runs inside the TradingView page when the extension can't reach the scanner itself.
-  async function inPagePost(url, body) {
-    try {
-      const r = await fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body });
-      return r.ok ? await r.json() : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  async function quotes(tickers) {
+  // One request per call. With `session`, it goes through the TradingView tab
+  // with the user's login (real-time where their plan includes it); otherwise
+  // straight from the extension. The other path is used only when the first
+  // one isn't available at all, never to retry a refusal.
+  async function quotes(tickers, { session = false } = {}) {
     if (!tickers.length) return [];
     const body = JSON.stringify({ symbols: { tickers }, columns: QUOTE_COLS });
-    let json = null;
-    try {
-      const r = await fetch(SCAN, {
-        method: 'POST',
-        credentials: 'omit',
-        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },   // simple request: no CORS pre-check
-        body,
-      });
-      if (r.ok) json = await r.json();
-    } catch (e) {}
-    // Fallback: ask the TradingView tab to fetch, with TradingView's own origin.
-    if (!json && available) {
-      try {
-        const tab = await findTab();
-        if (tab && isTV(tab.url)) json = await run(tab.id, inPagePost, [SCAN, body]);
-      } catch (e) {}
+    let res, fromTab;
+    if (session) {
+      res = await viaTab(SCAN, 'POST', body, 'include'); fromTab = true;
+      if (!res) { res = await direct(SCAN, 'POST', body); fromTab = false; }
+    } else {
+      res = await direct(SCAN, 'POST', body); fromTab = false;
+      if (!res) { res = await viaTab(SCAN, 'POST', body, 'omit'); fromTab = true; }
     }
-    if (!json) throw new Error('quotes unavailable');
+    const json = unwrap(res, 'quotes', fromTab);
     return (json.data || []).map(({ s, d }) => {
       const [price, chp, ch, name, scale, logo, baseLogo, curLogo, type, mode] = d;
       const logos = [];
@@ -252,7 +265,7 @@ window.TV = (() => {
       return {
         sym: s, price, chp, ch, name: name || '',
         dec: scale > 1 ? Math.min(8, Math.round(Math.log10(scale))) : 0,
-        logos, delayed: /delayed/.test(mode || ''),
+        logos, delayMin: (/delayed_streaming_(\d+)/.exec(mode || '') || [])[1] / 60 || 0,
       };
     });
   }
@@ -272,5 +285,5 @@ window.TV = (() => {
     window.close();
   }
 
-  return { available, embedded, quotes, showSymbol, currentSymbol, status, open, onTabsChanged, search, closePanel };
+  return { available, embedded, RateLimited, quotes, showSymbol, currentSymbol, status, open, onTabsChanged, search, closePanel };
 })();

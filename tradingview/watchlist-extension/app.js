@@ -112,6 +112,10 @@ function migrate(d) {
   if (!ok) d.active = 'list:' + d.lists[0].id;
   d.theme = d.theme || 'system';
   d.wheel = !!d.wheel;
+  // Seconds between price updates (0 = manual). Older versions defaulted to 5s or allowed 2s; move them to 15s once.
+  if (d.refreshV !== 2) { if (d.refresh === 2 || d.refresh === 5 || d.refresh == null) d.refresh = 15; d.refreshV = 2; }
+  d.refresh = [0, 5, 15, 60].includes(d.refresh) ? d.refresh : 15;
+  d.session = d.session !== false;                                  // fetch prices with the user's TradingView login
   d.logos = d.logos && typeof d.logos === 'object' ? d.logos : {};
   d.v = 3;
   return d;
@@ -170,7 +174,9 @@ const el = {
   flagPop: $('flagPop'),
   dlg: $('dlg'), dlgForm: $('dlgForm'), dlgTitle: $('dlgTitle'), dlgMsg: $('dlgMsg'), dlgInput: $('dlgInput'),
   dlgOk: $('dlgOk'), dlgCancel: $('dlgCancel'),
-  toast: $('toast'), fileInput: $('fileInput'),
+  toast: $('toaster'), fileInput: $('fileInput'),
+  refreshSeg: $('refreshSeg'), sessionToggle: $('sessionToggle'), syncBtn: $('syncBtn'),
+  priceWrap: $('priceWrap'), priceState: $('priceState'), priceAgo: $('priceAgo'),
 };
 const EMPTY_HINT = `Search by ticker or company and add it in one keystroke.<br><button class="cta" data-act="openSearch">${ico('plus')}Add symbol</button>`;
 const TAG_HINT = (name) => `Tag a symbol with the ${ico('bookmark')} on its row and it shows up in the ${esc(name)}.`;
@@ -246,16 +252,17 @@ const askConfirm = (title, message, okText = 'Delete') => openDialog({ title, me
 
 /* ---------- actions ---------- */
 function addEntries(entries, { quiet = false } = {}) {
-  let added = 0, dupes = 0, overflow = 0, sections = 0;
+  let dupes = 0, overflow = 0, sections = 0;
+  const addedSyms = [], dupeSyms = [];
   const now = Date.now();
   if (src.kind === 'tag') {
     let count = src.items.length;
     for (const e of entries) {
       if (!e.s) continue;
-      if (meta(e.s).f === src.tag) { dupes++; continue; }
+      if (meta(e.s).f === src.tag) { dupes++; dupeSyms.push(e.s); continue; }
       if (count >= MAX_ITEMS) { overflow++; continue; }
-      setMeta(e.s, { f: src.tag, ft: now + added });
-      added++; count++;
+      setMeta(e.s, { f: src.tag, ft: now + addedSyms.length });
+      addedSyms.push(e.s); count++;
     }
   } else {
     const list = src.list;
@@ -263,24 +270,128 @@ function addEntries(entries, { quiet = false } = {}) {
     let count = existing.size;
     for (const e of entries) {
       if (e.sec) { list.items.push({ sec: e.sec, c: false, t: now }); sections++; continue; }
-      if (existing.has(e.s)) { dupes++; continue; }
+      if (existing.has(e.s)) { dupes++; dupeSyms.push(e.s); continue; }
       if (count >= MAX_ITEMS) { overflow++; continue; }
-      list.items.push({ s: e.s, t: now + added });
+      list.items.push({ s: e.s, t: now + addedSyms.length });
       existing.add(e.s);
-      count++; added++;
+      count++; addedSyms.push(e.s);
     }
   }
+  const added = addedSyms.length;
   scheduleSave();
   refresh();
   if (!quiet) {
-    const parts = [];
-    if (added) parts.push(`Added ${added}`);
-    if (sections) parts.push(`${sections} section${sections > 1 ? 's' : ''}`);
-    if (dupes) parts.push(`${dupes} already in list`);
-    if (overflow) parts.push(`${overflow} skipped (limit ${MAX_ITEMS})`);
-    if (parts.length) toast(parts.join(' · '));
+    if (overflow) {
+      toast('List is full', { type: 'error', description: `${plural(overflow, 'symbol')} weren't added. A list holds up to ${nf(0).format(MAX_ITEMS)}.` });
+    } else if (!added && dupes) {
+      toast(dupes === 1 ? `${tickerOf(dupeSyms[0])} is already in ${src.name}` : `All ${dupes} symbols are already in ${src.name}`, { type: 'info' });
+    } else if (added) {
+      const extra = [];
+      if (dupes) extra.push(`${plural(dupes, 'symbol')} already in the list`);
+      if (sections) extra.push(plural(sections, 'section'));
+      toast(added === 1 ? `Added ${tickerOf(addedSyms[0])}` : `Added ${added} symbols`, { type: 'success', description: extra.join(' · ') });
+    }
   }
-  return { added, dupes, overflow };
+  return { added, dupes, overflow, syms: addedSyms };
+}
+const plural = (n, word) => `${nf(0).format(n)} ${word}${n === 1 ? '' : 's'}`;
+
+// Symbols typed, pasted or imported are checked against TradingView after they
+// are added. Bare tickers get their exchange; anything TradingView doesn't list
+// is taken back out and reported, so the list never holds dead rows.
+const validating = new Set();
+async function validateAdded(syms) {
+  if (!syms || !syms.length) return { failed: [], stopped: false };
+  const target = data.active;
+  syms.forEach((s) => validating.add(s));
+  const failed = [];
+  let renamed = 0, checked = 0, stopped = false;
+  const total = syms.length;
+  const progress = total > 10
+    ? toast(`Checking ${plural(total, 'symbol')}`, { type: 'info', description: 'Matching them with TradingView', duration: Infinity })
+    : null;
+  const tick = (n) => { checked += n; if (progress) updateToast(progress, { description: `${nf(0).format(Math.min(checked, total))} of ${nf(0).format(total)} checked` }); };
+  try {
+    const full = syms.filter((s) => s.includes(':'));
+    const bare = syms.filter((s) => !s.includes(':'));
+    const notFound = [];
+    for (let i = 0; i < full.length; i += 200) {
+      if (limited()) { stopped = true; break; }
+      const chunk = full.slice(i, i + 200);
+      const got = new Set((await TV.quotes(chunk, { session: data.session })).map((q) => q.sym));
+      chunk.forEach((s) => { if (!got.has(s)) notFound.push(s); });
+      tick(chunk.length - chunk.filter((s) => !got.has(s)).length);
+      await pause(SEARCH_GAP);
+    }
+    // The price service doesn't carry every instrument; confirm with symbol search before rejecting.
+    for (const s of notFound) {
+      if (stopped || limited()) { stopped = true; break; }
+      const { exch, ticker } = splitSymbol(s);
+      const res = await TV.search(ticker, '', exch, { session: data.session });
+      if (!res.some((r) => r.id === s)) failed.push(s);
+      tick(1);
+      await pause(SEARCH_GAP);
+    }
+    const pref = preferredExchange();
+    for (const s of bare) {
+      if (stopped || limited()) { stopped = true; break; }
+      const res = await TV.search(s, '', '', { session: data.session });
+      const exact = res.filter((r) => r.ticker.toUpperCase() === s);
+      const pick = (pref && exact.find((r) => r.id.startsWith(pref + ':'))) || exact[0];
+      if (pick) { renameSymbol(s, pick.id, pick.logos[0]); renamed++; }
+      else failed.push(s);
+      tick(1);
+      await pause(SEARCH_GAP);
+    }
+  } catch (e) {
+    // Rate limited: pause everything. Unreachable: keep what was added; rows show "No data" if wrong.
+    if (e instanceof TV.RateLimited) hitLimit();
+    stopped = true;
+  } finally {
+    syms.forEach((s) => validating.delete(s));
+    if (progress) dismissToast(progress);
+  }
+  if (failed.length) removeSymbols(failed, target);
+  if (renamed || failed.length) { scheduleSave(); refresh(); }
+  return { failed, stopped };
+}
+
+// Add typed / pasted / imported symbols, check them, then show one accurate result.
+async function addAndValidate(entries) {
+  const listName = src.name;
+  const res = addEntries(entries, { quiet: true });
+  const { failed, stopped } = await validateAdded(res.syms);
+  const ok = res.added - failed.length;
+  if (res.overflow) toast('List is full', { type: 'error', description: `${plural(res.overflow, 'symbol')} weren't added. A list holds up to ${nf(0).format(MAX_ITEMS)}.` });
+  if (ok > 0) {
+    const okSyms = res.syms.filter((x) => !failed.includes(x));
+    toast(ok === 1 ? `Added ${tickerOf(okSyms[0])}` : `Added ${ok} symbols`, {
+      type: 'success',
+      description: stopped ? 'Some are still to be checked; that resumes on its own.'
+        : res.dupes ? `${plural(res.dupes, 'symbol')} already in ${listName}` : `to ${listName}`,
+    });
+  } else if (res.dupes && !failed.length && !res.overflow) {
+    toast(res.dupes === 1 ? 'Already in this list' : `All ${res.dupes} symbols are already in ${listName}`, { type: 'info' });
+  }
+  if (failed.length) {
+    const names = failed.map((x) => tickerOf(x));
+    toast(failed.length === 1 ? `${names[0]} wasn't added` : `${failed.length} symbols weren't added`, {
+      type: 'error',
+      description: failed.length === 1
+        ? "TradingView doesn't list it. Check the ticker and exchange."
+        : `TradingView doesn't list ${names.slice(0, 3).join(', ')}${failed.length > 3 ? ` and ${failed.length - 3} more` : ''}.`,
+    });
+  }
+}
+
+function removeSymbols(syms, key) {
+  const drop = new Set(syms);
+  if (key.startsWith('tag:')) syms.forEach((s) => setMeta(s, { f: '' }));
+  else {
+    const l = data.lists.find((x) => 'list:' + x.id === key);
+    if (l) l.items = l.items.filter((i) => !drop.has(i.s));
+  }
+  syms.forEach((s) => quoteCache.delete(s));
 }
 
 function removeAt(itemIdx) {
@@ -432,6 +543,7 @@ function renderListBar() {
   el.count.title = `${n} of ${MAX_ITEMS} symbols`;
   el.sectionBtn.disabled = isTag;
   el.wheelToggle.classList.toggle('on', data.wheel);
+  renderRefreshSeg();
 }
 
 function buildView() {
@@ -542,7 +654,7 @@ function renderRows() {
   }
   el.rows.replaceChildren(frag);
   el.rows.querySelectorAll('.row.sym').forEach(fitRow);
-  scheduleQuotes(rendered.some((s) => !quoteCache.has(s)) ? 60 : null);
+  scheduleQuotes(rendered.some((s) => !quoteCache.has(s)) ? 400 : null);   // new rows: fetch once scrolling settles
 
   if (editingSym) {
     const inp = el.rows.querySelector('.note-input');
@@ -578,16 +690,21 @@ function renameSymbol(from, to, logo) {
   if (currentSym === from) currentSym = to;
 }
 async function resolveBareSymbols() {
-  if (resolving) return;
-  const bare = [...new Set(data.lists.flatMap((l) => l.items.filter((i) => i.s && !i.s.includes(':') && !resolveFailed.has(i.s)).map((i) => i.s)))];
+  if (resolving || limited()) return;
+  const bare = [...new Set(data.lists.flatMap((l) => l.items.filter((i) => i.s && !i.s.includes(':') && !resolveFailed.has(i.s) && !validating.has(i.s)).map((i) => i.s)))];
   if (!bare.length) return;
   resolving = true;
   const pref = preferredExchange();
   bare.sort((a, b) => (rendered.includes(b) ? 1 : 0) - (rendered.includes(a) ? 1 : 0));   // on-screen first
-  let fixed = 0, sinceRender = 0;
+  const progress = bare.length > 10
+    ? toast(`Matching ${plural(bare.length, 'symbol')} to their exchange`, { type: 'info', description: 'This runs slowly to stay within TradingView limits', duration: Infinity })
+    : null;
+  let fixed = 0, done = 0, sinceRender = 0;
   for (const sym of bare) {
+    if (limited()) break;
     let res;
-    try { res = await TV.search(sym, '', ''); } catch { break; }    // search unreachable: try again later
+    try { res = await TV.search(sym, '', '', { session: data.session }); }
+    catch (e) { if (e instanceof TV.RateLimited) hitLimit(); break; }   // try again later
     const exact = res.filter((r) => r.ticker.toUpperCase() === sym);
     const pick = (pref && exact.find((r) => r.id.startsWith(pref + ':'))) || exact[0];
     if (pick) { renameSymbol(sym, pick.id, pick.logos[0]); fixed++; sinceRender++; }
@@ -597,14 +714,17 @@ async function resolveBareSymbols() {
       quoteCache.set(sym, miss);
       patchRow(miss, null);
     }
+    done++;
+    if (progress) updateToast(progress, { description: `${nf(0).format(done)} of ${nf(0).format(bare.length)} done` });
     if (sinceRender >= 10) { sinceRender = 0; scheduleSave(); refresh(); }   // show progress on long lists
-    await new Promise((r) => setTimeout(r, 120));
+    await pause(SEARCH_GAP);
   }
   resolving = false;
+  if (progress) dismissToast(progress);
   if (fixed) {
     scheduleSave();
     refresh();
-    toast(`Matched ${fixed} symbol${fixed === 1 ? '' : 's'} to ${pref || 'their exchanges'}`);
+    toast(`Matched ${plural(fixed, 'symbol')} to ${pref || 'their exchanges'}`, { type: 'success' });
   }
 }
 
@@ -630,8 +750,8 @@ function avatarHtml(sym, ticker, q) {
 const quoteCache = new Map();
 let rendered = [];
 let quoteTimer = null;
-let quoteBusy = false;
-const QUOTE_EVERY = 4000;
+let lastQuoteAt = 0;
+let quoteStatus = { delayMin: 0, failed: false };
 
 const numFmt = new Map();
 function nf(dec) {
@@ -661,36 +781,149 @@ function chgHtml(q) {
   return `<span class="chg ${dirClass(q)}">${fmtChange(q)}</span>`;
 }
 
-function scheduleQuotes(delay) {
-  clearTimeout(quoteTimer);
-  quoteTimer = setTimeout(pullQuotes, delay == null ? QUOTE_EVERY : delay);
+/* Safeguards so the extension stays a light, polite client of TradingView:
+   - one request at a time, only for rows on screen, only while visible;
+   - every open dock shares what it fetched, so tabs don't repeat each other;
+   - errors slow polling down; a "slow down" answer (429/503/blocked) pauses
+     prices and symbol checks in every tab: 30s, then 1m, 2m ... up to 5m. */
+const SEARCH_GAP = 400;                  // ms between symbol checks
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+let backoffUntil = 0, backoffMs = 0, failStreak = 0, lastLimitToast = 0;
+const limited = () => Date.now() < backoffUntil;
+const fmtWait = (ms) => { const s = Math.max(1, Math.ceil(ms / 1000)); return s < 60 ? `${s}s` : `${Math.ceil(s / 60)}m`; };
+let quotePromise = null;
+let shared = { at: 0, syms: new Set() };
+const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('wl-quotes') : null;
+
+function hitLimit(fromPeer = false, peer = null) {
+  if (peer) { backoffMs = peer.ms; backoffUntil = Math.max(backoffUntil, peer.until); }
+  else {
+    backoffMs = Math.min(300000, backoffMs ? backoffMs * 2 : 30000);
+    backoffUntil = Date.now() + backoffMs;
+  }
+  if (!fromPeer) {
+    bc?.postMessage({ type: 'limit', until: backoffUntil, ms: backoffMs });
+    if (Date.now() - lastLimitToast > 60000) {
+      lastLimitToast = Date.now();
+      toast('TradingView asked us to slow down', { type: 'error', description: `Prices and symbol checks are paused for ${fmtWait(backoffMs)}. They resume on their own.` });
+    }
+  }
+  updatePriceStatus();
+  scheduleQuotes();
 }
 
-async function pullQuotes() {
-  if (quoteBusy) return;
-  if (document.hidden || !rendered.length) { scheduleQuotes(); return; }
-  quoteBusy = true;
+function scheduleQuotes(delay) {
+  clearTimeout(quoteTimer);
+  if (delay == null) {
+    if (!data.refresh) { if (limited()) quoteTimer = setTimeout(updatePriceStatus, backoffUntil - Date.now() + 250); return; }
+    // After failures, wait longer each time (up to 5 minutes).
+    delay = Math.min(300000, data.refresh * 1000 * Math.pow(2, Math.min(failStreak, 5)));
+  }
+  if (limited()) delay = Math.max(delay, backoffUntil - Date.now() + 250);
+  quoteTimer = setTimeout(() => pullQuotes(), delay);
+}
+
+// At most one request in flight; callers (timer, sync button) share it.
+function pullQuotes(force = false) {
+  if (quotePromise) return quotePromise;
+  quotePromise = fetchQuotes(force).finally(() => { quotePromise = null; });
+  return quotePromise;
+}
+
+async function fetchQuotes(force) {
+  if ((document.hidden && !force) || !rendered.length) { scheduleQuotes(); return; }
+  if (limited()) { updatePriceStatus(); scheduleQuotes(); return; }
   const want = rendered.filter((s) => s.includes(':')).slice(0, 120);
   if (rendered.some((s) => !s.includes(':'))) resolveBareSymbols();
-  if (!want.length) { quoteBusy = false; scheduleQuotes(); return; }
+  if (!want.length) { scheduleQuotes(); return; }
+  // Another open dock fetched these symbols moments ago: use its prices instead.
+  const interval = (data.refresh || 15) * 1000;
+  if (!force && Date.now() - shared.at < interval * 0.8 && want.every((s) => shared.syms.has(s))) { scheduleQuotes(); return; }
   try {
-    const res = await TV.quotes(want);
-    const got = new Set(res.map((q) => q.sym));
-    for (const sym of want) {
-      if (got.has(sym) || quoteCache.get(sym)?.missing) continue;
-      const miss = { sym, missing: true, logos: [] };
-      quoteCache.set(sym, miss);
-      patchRow(miss, null);
-    }
-    for (const q of res) {
-      const prev = quoteCache.get(q.sym);
-      quoteCache.set(q.sym, q);
-      if (q.logos[0] && data.logos[q.sym] !== q.logos[0]) { data.logos[q.sym] = q.logos[0]; scheduleSave(); }
-      patchRow(q, prev);
-    }
-  } catch { /* offline or preview: keep showing the last prices */ }
-  quoteBusy = false;
+    const res = await TV.quotes(want, { session: data.session });
+    failStreak = 0;
+    backoffMs = 0;
+    applyQuotes(res, want, Date.now());
+    bc?.postMessage({ type: 'quotes', at: lastQuoteAt, want, quotes: res });
+  } catch (e) {
+    if (e instanceof TV.RateLimited) hitLimit();
+    else { failStreak++; quoteStatus = { ...quoteStatus, failed: true }; }   // offline: keep the last prices
+  }
+  updatePriceStatus();
   scheduleQuotes();
+}
+
+function applyQuotes(res, want, at) {
+  const got = new Set(res.map((q) => q.sym));
+  lastQuoteAt = Math.max(lastQuoteAt, at);
+  quoteStatus = { delayMin: res.reduce((m, q) => Math.max(m, q.delayMin || 0), 0), failed: false };
+  for (const sym of want) {
+    if (got.has(sym) || quoteCache.get(sym)?.missing) continue;
+    const miss = { sym, missing: true, logos: [] };
+    quoteCache.set(sym, miss);
+    patchRow(miss, null);
+  }
+  for (const q of res) {
+    const prev = quoteCache.get(q.sym);
+    quoteCache.set(q.sym, q);
+    if (q.logos[0] && data.logos[q.sym] !== q.logos[0]) { data.logos[q.sym] = q.logos[0]; scheduleSave(); }
+    patchRow(q, prev);
+  }
+}
+
+if (bc) {
+  bc.onmessage = (e) => {
+    const m = e.data || {};
+    if (m.type === 'quotes' && Array.isArray(m.quotes)) {
+      shared = { at: m.at, syms: new Set(m.want || []) };
+      applyQuotes(m.quotes, m.want || [], m.at);
+      updatePriceStatus();
+    } else if (m.type === 'limit') {
+      hitLimit(true, m);
+    }
+  };
+}
+
+// Footer: live or delayed, when prices last updated, and a sync button.
+function agoText(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 5) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`;
+}
+function updatePriceStatus() {
+  if (!el.priceState) return;
+  const st = quoteStatus;
+  let label, cls, tip;
+  if (limited()) {
+    label = 'Paused'; cls = 'delayed';
+    tip = `TradingView asked us to slow down. Prices resume in ${fmtWait(backoffUntil - Date.now())}.`;
+  } else if (st.failed) { label = 'Offline'; cls = 'off'; tip = "Couldn't reach TradingView. Showing the last prices; retrying less often until it's back."; }
+  else if (!lastQuoteAt) { label = 'Loading'; cls = ''; tip = 'Fetching prices'; }
+  else if (st.delayMin) {
+    label = `Delayed ${st.delayMin}m`; cls = 'delayed';
+    tip = `TradingView delays prices from some exchanges by ${st.delayMin} minutes unless your TradingView plan includes real-time data for them.` +
+      (data.session ? '' : ' Turn on "Use my TradingView login" to get the prices your plan includes.');
+  } else { label = 'Live'; cls = 'live'; tip = 'Real-time prices'; }
+  el.priceState.textContent = label;
+  el.priceState.title = tip;
+  el.footDot.className = 'dot ' + cls;
+  el.priceAgo.textContent = lastQuoteAt ? '· ' + agoText(Date.now() - lastQuoteAt) : '';
+  el.priceAgo.title = lastQuoteAt ? 'Updated ' + new Date(lastQuoteAt).toLocaleTimeString() : '';
+  el.syncBtn.disabled = limited();
+  el.syncBtn.title = limited() ? `Paused for ${fmtWait(backoffUntil - Date.now())}: TradingView asked us to slow down` : 'Sync prices now';
+}
+setInterval(() => { if (!document.hidden) updatePriceStatus(); }, 1000);
+
+async function syncNow() {
+  if (limited()) return;
+  const started = Date.now();
+  el.syncBtn.classList.add('spinning');
+  if (quotePromise) await quotePromise;                               // a refresh is running: that one is the latest
+  else if (Date.now() - lastQuoteAt > 1500) await pullQuotes(true);   // anything newer than 1.5s is already current
+  await pause(Math.max(0, 450 - (Date.now() - started)));             // keep the feedback visible for a beat
+  el.syncBtn.classList.remove('spinning');
 }
 
 // Update one visible row's price cells without rebuilding the list.
@@ -848,14 +1081,16 @@ async function runSearch() {
   ssState = 'loading';
   el.ssBar.classList.add('loading');
   try {
-    const res = await TV.search(q, ssType);
+    if (limited()) throw new TV.RateLimited('paused');
+    const res = await TV.search(q, ssType, '', { session: data.session });
     if (seq !== ssSeq) return;
     ssResults = res;
     ssState = res.length ? 'ok' : 'empty';
-  } catch {
+  } catch (e) {
     if (seq !== ssSeq) return;
     ssResults = [];
-    ssState = 'error';
+    ssState = e instanceof TV.RateLimited ? 'limited' : 'error';
+    if (e instanceof TV.RateLimited && e.message !== 'paused') hitLimit();
   }
   ssHl = 0;
   renderResults();
@@ -884,6 +1119,8 @@ function renderResults() {
     html = `<button class="ss-bulk" data-act="bulk"><strong>Add ${ssBulk.length} symbols</strong><span>${esc(ssBulk.map((e) => e.s).join(', '))}</span></button>`;
   } else if (ssState === 'error') {
     html = `<div class="ss-empty">Couldn't reach TradingView search.<small>Check your connection, or add the symbol exactly as typed.</small><br><button class="link-btn" data-act="raw">Add “${q}” as typed</button></div>`;
+  } else if (ssState === 'limited') {
+    html = `<div class="ss-empty">TradingView asked us to slow down.<small>Search is paused for ${fmtWait(backoffUntil - Date.now())}. Try again then.</small></div>`;
   } else if (ssState === 'empty') {
     html = `<div class="ss-empty">No symbols match “${q}”.<br><button class="link-btn" data-act="raw">Add “${q}” as typed</button></div>`;
   } else {
@@ -905,10 +1142,11 @@ function renderResults() {
 function addResult(i) {
   const r = ssResults[i];
   if (!r) return;
-  if (inCurrent(r.id)) { toast(`${r.ticker} is already in ${src.name}`); return; }
+  if (inCurrent(r.id)) { toast(`${r.ticker} is already in ${src.name}`, { type: 'info' }); return; }
   data.logos[r.id] = r.logos[0] || '';
   const res = addEntries([{ s: r.id }], { quiet: true });
-  toast(res.overflow ? `List is full (${MAX_ITEMS})` : `Added ${r.ticker} to ${src.name}`);
+  if (res.overflow) toast(`${r.ticker} wasn't added`, { type: 'error', description: `${src.name} is full. A list holds up to ${nf(0).format(MAX_ITEMS)} symbols.` });
+  else toast(`Added ${r.ticker}`, { type: 'success', description: `to ${src.name}` });
   renderResults();
   el.ssInput.focus();
   el.ssInput.select();
@@ -916,8 +1154,8 @@ function addResult(i) {
 
 function addRaw() {
   const entries = parseEntries(el.ssInput.value);
-  if (!entries.length) return toast('Enter a symbol like AAPL or NASDAQ:AAPL');
-  addEntries(entries);
+  if (!entries.length) return toast('Enter a symbol like AAPL or NASDAQ:AAPL', { type: 'info' });
+  addAndValidate(entries);
   el.ssInput.value = '';
   runSearch();
   el.ssInput.focus();
@@ -952,7 +1190,7 @@ el.ssInput.addEventListener('paste', (e) => {
   const entries = parseEntries(text);
   if (!entries.length) return;
   e.preventDefault();
-  addEntries(entries);
+  addAndValidate(entries);
 });
 el.ssClear.addEventListener('click', () => { el.ssInput.value = ''; runSearch(); el.ssInput.focus(); });
 el.ssClose.addEventListener('click', closeSearch);
@@ -978,17 +1216,138 @@ el.ssResults.addEventListener('mousemove', (e) => {
 // Broken logos fall back to the letter avatar underneath.
 el.ssResults.addEventListener('error', (e) => { if (e.target.tagName === 'IMG') e.target.remove(); }, true);
 
-/* ---------- toast ---------- */
-let toastTimer;
-function toast(msg) {
-  el.toast.textContent = msg;
-  el.toast.hidden = false;
-  el.toast.classList.remove('leaving');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    el.toast.classList.add('leaving');
-    toastTimer = setTimeout(() => { el.toast.hidden = true; el.toast.classList.remove('leaving'); }, 150);
-  }, 2000);
+/* ---------- toasts ----------
+ Modelled on Sonner (Emil Kowalski): stacked cards at the bottom, newest in
+ front, older ones tucked behind and scaled down; hover fans the stack out and
+ pauses the timers; swipe down or click × to dismiss. Transitions (not
+ keyframes) so rapid toasts retarget smoothly. */
+const TOAST_ICONS = {
+  success: '<svg class="tst-ic" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.86-9.3a.75.75 0 0 0-1.22-.88l-3.24 4.5-1.6-1.6a.75.75 0 1 0-1.06 1.06l2.22 2.22a.75.75 0 0 0 1.14-.09l3.76-5.2Z" clip-rule="evenodd"/></svg>',
+  error: '<svg class="tst-ic" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd"/></svg>',
+  info: '<svg class="tst-ic" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.25v3.25c0 .41.34.75.75.75h.75a.75.75 0 0 0 0-1.5h-.25V9.75A.75.75 0 0 0 10.75 9H9Z" clip-rule="evenodd"/></svg>',
+};
+const TOAST_GAP = 8;
+const TOAST_VISIBLE = 3;
+const toasts = [];             // newest first
+let toastsExpanded = false;
+
+function toast(title, { type = 'default', description = '', duration } = {}) {
+  const t = {
+    el: document.createElement('li'),
+    remaining: duration ?? (type === 'error' ? 6000 : 2400),
+    started: 0, timer: 0, height: 0,
+  };
+  t.el.className = `tst tst-${type}`;
+  t.el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  t.el.innerHTML =
+    (TOAST_ICONS[type] || '') +
+    '<div class="tst-body"><div class="tst-title"></div><div class="tst-desc"></div></div>' +
+    `<button class="tst-x" aria-label="Dismiss">${ICON.del}</button>`;
+  t.el.querySelector('.tst-title').textContent = title;
+  const d = t.el.querySelector('.tst-desc');
+  if (description) d.textContent = description; else d.remove();
+  t.el.querySelector('.tst-x').addEventListener('click', () => dismissToast(t));
+  swipeToDismiss(t);
+
+  el.toast.appendChild(t.el);
+  t.height = t.el.offsetHeight;
+  toasts.unshift(t);
+  while (toasts.length > TOAST_VISIBLE + 2) dismissToast(toasts[toasts.length - 1], true);
+  requestAnimationFrame(() => { t.el.dataset.mounted = 'true'; layoutToasts(); });
+  layoutToasts();
+  if (!toastsExpanded && !document.hidden) startToastTimer(t);
+  return t;
+}
+
+function updateToast(t, { title, description } = {}) {
+  if (title != null) t.el.querySelector('.tst-title').textContent = title;
+  if (description != null) {
+    let d = t.el.querySelector('.tst-desc');
+    if (!d) { d = document.createElement('div'); d.className = 'tst-desc'; t.el.querySelector('.tst-body').appendChild(d); }
+    d.textContent = description;
+  }
+}
+
+function startToastTimer(t) {
+  clearTimeout(t.timer);
+  if (!Number.isFinite(t.remaining)) return;   // stays until dismissed in code
+  t.started = Date.now();
+  t.timer = setTimeout(() => dismissToast(t), t.remaining);
+}
+function pauseToastTimer(t) {
+  if (!t.started || !Number.isFinite(t.remaining)) return;
+  clearTimeout(t.timer);
+  t.remaining = Math.max(800, t.remaining - (Date.now() - t.started));
+  t.started = 0;
+}
+
+function dismissToast(t, instant = false) {
+  const i = toasts.indexOf(t);
+  if (i < 0) return;
+  toasts.splice(i, 1);
+  clearTimeout(t.timer);
+  if (instant) t.el.remove();
+  else {
+    t.el.dataset.removed = 'true';
+    setTimeout(() => t.el.remove(), 200);
+  }
+  layoutToasts();
+}
+
+// Collapsed: a tidy stack. Expanded (hover): every toast fully visible.
+function layoutToasts() {
+  let offset = 0;
+  toasts.forEach((t, i) => {
+    const s = t.el.style;
+    s.zIndex = String(100 - i);
+    if (toastsExpanded) {
+      s.transform = `translateY(${-offset}px)`;
+      s.opacity = '1';
+      offset += t.height + TOAST_GAP;
+    } else {
+      // Older toasts sit behind, same height as the front one so the stack looks even.
+      s.transform = i === 0 ? 'translateY(0)' : `translateY(${-i * 10}px) scale(${1 - i * 0.05})`;
+      s.opacity = i < TOAST_VISIBLE ? '1' : '0';
+      t.el.classList.toggle('behind', i > 0);
+    }
+    if (toastsExpanded) t.el.classList.remove('behind');
+    // Collapsed, the cards behind take the front card's height so the stack edges line up.
+    s.height = !toastsExpanded && i > 0 && toasts[0] ? toasts[0].height + 'px' : '';
+    s.overflow = s.height ? 'hidden' : '';
+  });
+}
+el.toast.addEventListener('mouseenter', () => { toastsExpanded = true; toasts.forEach(pauseToastTimer); layoutToasts(); });
+el.toast.addEventListener('mouseleave', () => { toastsExpanded = false; toasts.forEach(startToastTimer); layoutToasts(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) toasts.forEach(pauseToastTimer);
+  else if (!toastsExpanded) toasts.forEach(startToastTimer);
+});
+
+// Drag down to dismiss; a quick flick is enough.
+function swipeToDismiss(t) {
+  let startY = 0, startAt = 0, dy = 0, dragging = false;
+  t.el.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.tst-x') || dragging) return;
+    dragging = true; startY = e.clientY; startAt = Date.now(); dy = 0;
+    t.el.setPointerCapture(e.pointerId);
+    t.el.style.transition = 'none';
+  });
+  t.el.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const raw = e.clientY - startY;
+    dy = raw > 0 ? raw : raw * 0.2;          // friction when dragged the wrong way
+    t.el.style.transform = `translateY(${dy}px)`;
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    t.el.style.transition = '';
+    const velocity = Math.abs(dy) / Math.max(1, Date.now() - startAt);
+    if (dy > 40 || (dy > 8 && velocity > 0.11)) dismissToast(t);
+    else layoutToasts();
+  };
+  t.el.addEventListener('pointerup', end);
+  t.el.addEventListener('pointercancel', end);
 }
 
 /* ---------- footer / TradingView status ---------- */
@@ -999,18 +1358,13 @@ async function updateFooter() {
 }
 function updateFooterText() {
   const st = tvStatus;
-  el.footBtn.hidden = true;
-  if (st.demo) {
-    el.footDot.className = 'dot';
-    el.footText.textContent = 'Preview mode';
-  } else if (st.chart || st.connected) {
-    el.footDot.className = 'dot on';
-    el.footText.textContent = currentSym || 'TradingView connected';
-  } else {
-    el.footDot.className = 'dot';
-    el.footText.textContent = 'No TradingView tab';
-    el.footBtn.hidden = false;
-  }
+  const noTab = !st.demo && !st.chart && !st.connected;
+  el.footBtn.hidden = !noTab;
+  el.priceWrap.hidden = noTab;
+  el.footText.hidden = !noTab && !st.demo;
+  el.footText.textContent = st.demo ? 'Preview' : 'No TradingView tab';
+  if (noTab) el.footDot.className = 'dot';
+  else updatePriceStatus();
 }
 let syncTimer;
 async function syncFromChart() {
@@ -1050,8 +1404,8 @@ function importFile(file) {
   const reader = new FileReader();
   reader.onload = () => {
     const entries = parseEntries(reader.result);
-    if (!entries.some((e) => e.s)) return toast('No symbols found in file');
-    addEntries(entries);
+    if (!entries.some((e) => e.s)) return toast('No symbols found in that file', { type: 'error' });
+    addAndValidate(entries);
   };
   reader.readAsText(file);
 }
@@ -1280,6 +1634,21 @@ el.viewport.addEventListener('keydown', (e) => {
 });
 
 // Theme: system -> light -> dark
+// Price refresh interval
+el.refreshSeg.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-refresh]');
+  if (!b) return;
+  data.refresh = Number(b.dataset.refresh);
+  renderRefreshSeg();
+  scheduleSave();
+  scheduleQuotes(data.refresh ? 0 : undefined);
+});
+function renderRefreshSeg() {
+  el.refreshSeg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', Number(b.dataset.refresh) === data.refresh));
+  el.sessionToggle.classList.toggle('on', data.session);
+}
+el.syncBtn.addEventListener('click', syncNow);
+
 // Theme: Auto (match TradingView) / Light / Dark
 el.themeSeg.addEventListener('click', (e) => {
   const b = e.target.closest('button[data-theme]');
@@ -1296,6 +1665,14 @@ el.menuBtn.addEventListener('click', (e) => {
 el.menu.addEventListener('click', (e) => {
   const act = e.target.closest('button')?.dataset.act;
   if (!act) return;
+  if (act === 'session') {
+    data.session = !data.session;
+    el.sessionToggle.classList.toggle('on', data.session);
+    scheduleSave();
+    toast(data.session ? 'Using your TradingView login for prices' : 'Using public prices', { type: 'info' });
+    pullQuotes(true);
+    return;
+  }
   if (act === 'wheel') {
     data.wheel = !data.wheel;
     el.wheelToggle.classList.toggle('on', data.wheel);
@@ -1349,7 +1726,7 @@ el.footBtn.addEventListener('click', async () => { await TV.open(); scheduleSync
 document.addEventListener('paste', (e) => {
   if (e.target instanceof Element && e.target.matches('input, textarea')) return;
   const entries = parseEntries(e.clipboardData.getData('text'));
-  if (entries.some((x) => x.s)) { e.preventDefault(); addEntries(entries); }
+  if (entries.some((x) => x.s)) { e.preventDefault(); addAndValidate(entries); }
 });
 
 // Drag & drop a .txt file onto the panel

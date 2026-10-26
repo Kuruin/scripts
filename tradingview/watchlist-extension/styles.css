@@ -312,9 +312,6 @@ kbd { font: 10.5px ui-monospace, Consolas, monospace; background: var(--bg-3); c
 .btn.danger { background: var(--danger); }
 
 /* ---------- toast ---------- */
-.toast { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%); z-index: 70; background: var(--text); color: var(--bg); padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; box-shadow: var(--shadow); max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: toast-in .16s ease-out; }
-.toast[hidden] { display: none; }
-@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 6px; }
@@ -339,7 +336,8 @@ kbd { font: 10.5px ui-monospace, Consolas, monospace; background: var(--bg-3); c
 .list-menu { transform-origin: top left; }
 .flag-pop { transform-origin: top left; }
 @media (prefers-reduced-motion: reduce) {
-  .pop, .ss, .toast { animation-name: fade-only; }
+  .pop, .ss { animation-name: fade-only; }
+  .tst { transition: opacity 200ms ease !important; }
   .row.sec .chev, .price { transition: none; }
 }
 @keyframes fade-only { from { opacity: 0; } to { opacity: 1; } }
@@ -371,8 +369,6 @@ html.embed .hdr { height: 40px; }
 /* A removed row fades and settles instead of vanishing. */
 .row.removing { opacity: 0; transform-origin: left center; transition: opacity 140ms ease; pointer-events: none; }
 /* Toasts leave the way they came, faster than they arrived. */
-.toast { transition: opacity 150ms ease, transform 150ms var(--ease-out); }
-.toast.leaving { opacity: 0; transform: translate(-50%, 4px); }
 /* Dialog backdrop fades with the box. */
 .dlg:not([hidden]) { animation: fade-only 150ms ease; }
 
@@ -381,3 +377,50 @@ html.embed .hdr { height: 40px; }
 .list-menu .lm-item:not(.active):hover { background: var(--bg-2); }
 
 .row.tight .chg .abs { display: none; }
+
+/* ---------- footer: price status + sync ---------- */
+.dot.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(8, 153, 129, .18); }
+.dot.delayed { background: #f5a623; box-shadow: 0 0 0 3px rgba(245, 166, 35, .18); }
+.dot.off { background: var(--danger); }
+.price-wrap { flex: 1 1 auto; min-width: 0; display: flex; gap: 4px; white-space: nowrap; overflow: hidden; }
+.price-wrap[hidden] { display: none; }
+.price-state { color: var(--text-2); cursor: help; }
+.price-ago { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+.sync-btn { width: 22px; height: 22px; border: 0; border-radius: 5px; padding: 0; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.sync-btn .ic { width: 13px; height: 13px; }
+.sync-btn:hover { background: var(--bg-3); color: var(--text); }
+.sync-btn:active { transform: scale(0.94); }
+/* Spins while a sync is in flight; disabled while TradingView has us paused. */
+.sync-btn.spinning .ic { animation: sync-turn 700ms linear infinite; }
+.sync-btn:disabled { opacity: .35; cursor: default; background: transparent; }
+@keyframes sync-turn { to { transform: rotate(360deg); } }
+.foot-text[hidden] { display: none; }
+.seg-text button { width: auto; min-width: 28px; padding: 0 6px; font-size: 11px; font-weight: 600; }
+@media (max-width: 200px) { .price-ago { display: none; } }
+
+/* ---------- toasts (Sonner-style) ---------- */
+.toaster { position: fixed; left: 8px; right: 8px; bottom: 34px; margin: 0; padding: 0; list-style: none; z-index: 70; pointer-events: none; }
+.toaster:empty { display: none; }
+.tst {
+  position: absolute; left: 0; right: 0; bottom: 0; pointer-events: auto;
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 8px 10px 11px;
+  background: var(--pop); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .12); font-size: 12.5px; line-height: 1.35;
+  transform-origin: bottom center; touch-action: none; user-select: none;
+  opacity: 0; transform: translateY(100%);
+  transition: transform 400ms ease, opacity 400ms ease;
+}
+.tst[data-mounted="true"] { opacity: 1; }
+.tst[data-removed="true"] { opacity: 0 !important; transform: translateY(100%) !important; transition: transform 200ms ease, opacity 200ms ease; pointer-events: none; }
+.tst.behind .tst-body, .tst.behind .tst-ic, .tst.behind .tst-x { opacity: 0; }
+.tst-body, .tst-ic, .tst-x { transition: opacity 200ms ease; }
+.tst-ic { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; }
+.tst-success .tst-ic { color: var(--ok); }
+.tst-error .tst-ic { color: var(--danger); }
+.tst-info .tst-ic { color: var(--accent-ink); }
+.tst-body { flex: 1 1 auto; min-width: 0; }
+.tst-title { font-weight: 600; overflow-wrap: anywhere; }
+.tst-desc { margin-top: 2px; color: var(--text-2); font-size: 11.5px; overflow-wrap: anywhere; }
+.tst-x { width: 18px; height: 18px; border: 0; border-radius: 4px; padding: 0; background: transparent; color: var(--text-3); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.tst-x .ic { width: 12px; height: 12px; }
+.tst-x:hover { color: var(--text); background: var(--bg-3); }
