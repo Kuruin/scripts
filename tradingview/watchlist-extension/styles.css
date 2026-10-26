@@ -357,6 +357,14 @@ html.embed .hdr { height: 40px; }
   #filterBtn, #closeBtn { display: none; }   /* Ctrl+F still opens the filter */
 }
 .list-pick { min-width: 84px; }
+/* The narrowest docks keep minimize reachable: the list name gives way, then the add
+   button goes (typing anywhere in the panel still opens search). */
+@media (max-width: 190px) {
+  .list-pick { min-width: 52px; }
+}
+@media (max-width: 170px) {
+  #addBtn { display: none; }
+}
 
 /* ---------- selection, loading, missing data ---------- */
 .tag-btn.active { border-color: transparent; background: var(--selected); box-shadow: inset 0 0 0 1px var(--border); }
@@ -521,3 +529,7 @@ html.embed .hdr { height: 40px; }
 .tst-btn:active { transform: scale(0.96); }
 .tst-btn.done { color: var(--ok); border-color: var(--ok); }
 .tst { max-height: 60vh; }
+
+/* Minimize only makes sense inside TradingView. */
+#miniBtn { display: none; }
+html.embed #miniBtn { display: inline-flex; }

@@ -200,7 +200,7 @@ function parseEntries(text) {
       part = part.trim();
       if (!part) return;
       if (part.startsWith('###')) {
-        const name = part.slice(3).trim();
+        const name = part.slice(3).trim().slice(0, 60);   // same cap as typed names
         if (name) out.push({ sec: name });
         return;
       }
@@ -565,8 +565,8 @@ function renderListBar() {
   el.listColor.innerHTML = isTag ? bookmarkSvg(src.color) : '';
   el.listColor.title = isTag ? src.name : 'Change list color';
   const n = symbolCount(src.items);
-  el.count.textContent = `${n} / ${MAX_ITEMS}`;
-  el.count.title = `${n} of ${MAX_ITEMS} symbols`;
+  el.count.textContent = `${nf(0).format(n)} / ${nf(0).format(MAX_ITEMS)}`;
+  el.count.title = `${nf(0).format(n)} of ${nf(0).format(MAX_ITEMS)} symbols`;
   el.sectionBtn.disabled = isTag;
   el.wheelToggle.classList.toggle('on', data.wheel);
   renderRefreshSeg();
@@ -650,7 +650,7 @@ function renderRows() {
     if (it.sec) {
       row.className = 'row sec' + (it.c ? ' collapsed' : '') + (vi === activeIdx ? ' active' : '');
       row.title = 'Click to collapse · double-click to rename';
-      row.innerHTML = `${ICON.chev}<span class="sec-name">${esc(it.sec)}</span><span class="sec-count">${secCount.get(idx) || 0}</span><button class="del" data-act="del" title="Remove section (keeps its symbols)">${ICON.del}</button>`;
+      row.innerHTML = `${ICON.chev}<span class="sec-name">${esc(it.sec)}</span><span class="sec-count">${nf(0).format(secCount.get(idx) || 0)}</span><button class="del" data-act="del" title="Remove section (keeps its symbols)">${ICON.del}</button>`;
       frag.appendChild(row);
       continue;
     }
@@ -759,15 +759,19 @@ function fitRow(row) {
   const sym = row.querySelector('.sym');
   if (!sym) return;
   // The ticker comes first: drop the point change, then the exchange badge, until it fits.
-  const cut = () => sym.scrollWidth > sym.clientWidth + 1;
+  // Compare exact widths: scrollWidth rounds, which hides a sub-pixel overflow that still ellipsizes.
+  const range = document.createRange();
+  range.selectNodeContents(sym);
+  const cut = () => range.getBoundingClientRect().width > sym.getBoundingClientRect().width + 0.25;
   row.classList.remove('tight', 'no-badge');
   if (cut() && row.querySelector('.chg .abs')) row.classList.add('tight');
   if (cut() && row.querySelector('.sym-line .ex-badge')) row.classList.add('no-badge');
 }
 
 /* ---------- logos ---------- */
+const badLogos = new Set();   // logo URLs that failed to load: show the letter instead
 function avatarHtml(sym, ticker, q) {
-  const urls = (q && q.logos.length) ? q.logos : (data.logos[sym] ? [data.logos[sym]] : []);
+  const urls = ((q && q.logos.length) ? q.logos : (data.logos[sym] ? [data.logos[sym]] : [])).filter((u) => !badLogos.has(u));
   const imgs = urls.map((u) => `<img src="${esc(u)}" alt="" loading="lazy">`).join('');
   return `<span class="av${urls.length > 1 ? ' pair' : ''}" style="--h:${hueOf(ticker)}">${esc(ticker[0] || '?')}${imgs}</span>`;
 }
@@ -791,12 +795,15 @@ const round = (v, dec) => Number(v.toFixed(dec));
 const sign = (v) => (v > 0 ? '+' : v < 0 ? '\u2212' : '');
 const dirOf = (q) => (q && q.ch != null ? Math.sign(round(q.ch, q.dec)) : 0);
 const dirClass = (q) => ['down', 'flat', 'up'][dirOf(q) + 1];
-const fmtPrice = (q) => (q.price == null ? '\u2014' : nf(q.dec).format(q.price));
+// Billions and up (market caps, TOTAL2) in short form, as TradingView does: 1.523T.
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 3 });
+const fmtNum = (v, dec) => (Math.abs(v) >= 1e9 ? compact.format(v) : nf(dec).format(v));
+const fmtPrice = (q) => (q.price == null ? '\u2014' : fmtNum(q.price, q.dec));
 function fmtChange(q) {
   if (q.ch == null || q.chp == null) return '';
   const ch = round(q.ch, q.dec), chp = round(q.chp, 2);
   const sg = sign(ch);   // percent takes the sign of the move even when it rounds to 0.00
-  return `<span class="abs">${sg}${nf(q.dec).format(Math.abs(ch))}</span><span class="pct">${sg}${nf(2).format(Math.abs(chp))}%</span>`;
+  return `<span class="abs">${sg}${fmtNum(Math.abs(ch), q.dec)}</span><span class="pct">${sg}${nf(2).format(Math.abs(chp))}%</span>`;
 }
 // Placeholder bars until the first price arrives; a dash when there is no data.
 function priceHtml(q) {
@@ -886,7 +893,8 @@ async function loadAllQuotes() {
   initialDone = true;
   updatePriceStatus();
   if (rendered.some((s) => !s.includes(':'))) resolveBareSymbols();
-  scheduleQuotes();
+  // A bare ticker matched to its exchange while this ran has no price yet: get it now.
+  scheduleQuotes(rendered.some((s) => s.includes(':') && !quoteCache.has(s)) ? 400 : undefined);
 }
 window.addEventListener('message', (e) => {
   if (e.source !== window.parent || !e.data || e.data.wl !== 'dockVisible') return;
@@ -1001,7 +1009,7 @@ function patchRow(q, prev) {
   const name = row.querySelector('.name:not(.note)');
   if (q.name) row.title = `${q.sym} · ${q.name}`;
   const av = row.querySelector('.av');
-  if (av && q.logos.length && !av.querySelector('img')) av.outerHTML = avatarHtml(q.sym, splitSymbol(q.sym).ticker, q);
+  if (av && q.logos.some((u) => !badLogos.has(u)) && !av.querySelector('img')) av.outerHTML = avatarHtml(q.sym, splitSymbol(q.sym).ticker, q);
   if (q.missing) {
     if (price) price.outerHTML = priceHtml(q);
     if (chg) chg.outerHTML = chgHtml(q);
@@ -1033,7 +1041,7 @@ function renderListMenu() {
       `<div class="lm-item${active ? ' active' : ''}" role="option" tabindex="0" aria-selected="${active}" data-key="${key}">` +
       `<span class="lm-dot" style="background:${esc(l.color || LIST_COLORS[0])}"></span>` +
       `<span class="lm-name">${esc(l.name)}</span>` +
-      `<span class="lm-count">${symbolCount(l.items)}</span>` +
+      `<span class="lm-count">${nf(0).format(symbolCount(l.items))}</span>` +
       `<span class="lm-actions">` +
         `<button class="lm-act" data-act="rename" data-id="${l.id}" title="Rename ${esc(l.name)}">${ico('pencil')}</button>` +
         (solo ? '' : `<button class="lm-act danger" data-act="delete" data-id="${l.id}" title="Delete ${esc(l.name)}">${ico('trash')}</button>`) +
@@ -1348,6 +1356,12 @@ el.ssResults.addEventListener('mousemove', (e) => {
 });
 // Broken logos fall back to the letter avatar underneath.
 el.ssResults.addEventListener('error', (e) => { if (e.target.tagName === 'IMG') e.target.remove(); }, true);
+el.rows.addEventListener('error', (e) => {
+  if (e.target.tagName !== 'IMG') return;
+  badLogos.add(e.target.getAttribute('src'));
+  e.target.parentElement?.classList.remove('pair');
+  e.target.remove();
+}, true);
 
 /* ---------- toasts ----------
  Modelled on Sonner (Emil Kowalski): stacked cards at the bottom, newest in
@@ -1654,6 +1668,8 @@ function sortList(mode) {
 
 /* ---------- events ---------- */
 el.closeBtn.addEventListener('click', () => TV.closePanel());
+// Minimize: the dock collapses to a pill; ↑/↓ on TradingView keep switching this watchlist.
+document.getElementById('miniBtn').addEventListener('click', () => window.parent.postMessage({ wl: 'minimize' }, '*'));
 el.addBtn.addEventListener('click', () => openSearch());
 el.listColor.addEventListener('click', cycleListColor);
 el.listName.addEventListener('click', (e) => {

@@ -20,6 +20,7 @@ After changing any file, click the reload icon on the extension's card, then ref
 - Sits inside TradingView's own layout, between the chart and TradingView's right toolbar, with TradingView's gaps and panel colour. It only ever appears in TradingView tabs; the extension icon on any other site switches to your TradingView tab, or opens one.
 - **Resize** by dragging its left edge (150 to 520px). Double-click the edge to reset to 240px. The dock follows the pointer and the chart catches up when you pause or let go.
 - Stays open across TradingView pages and reloads until you toggle it off.
+- **Minimize** (the arrows button in the dock's header) is also how the watchlist starts on a fresh install, so ↑ / ↓ work straight away. It collapses the dock into a small pill at the bottom right of the chart. TradingView gets its full width back, so it looks closed, but **↑ / ↓** on the chart keep switching through this watchlist instead of TradingView's. The pill shows the current symbol and its place in the list (for example "SSWL 2/4"). Its ▲ / ▼ buttons and the mouse wheel over it switch symbols too, and clicking the name expands the dock again.
 - **Theme**: Auto (follows TradingView's light or dark mode), Light or Dark, from the ⋯ menu.
 - Every popup (menu, list switcher, tag picker, search, dialogs, notifications) fits the dock at any width and height: long labels wrap, button groups stack on narrow docks, and tall content scrolls.
 
@@ -50,7 +51,7 @@ Each row shows the ticker on the left and the price over its change (points and 
 | Key | Action |
 | --- | --- |
 | Alt+W | Open or close the dock |
-| ↑ / ↓ | Previous / next symbol, switching the chart |
+| ↑ / ↓ | Previous / next symbol, switching the chart. Also works on the chart while the dock is open or minimized (not while it's fully closed) |
 | Space / Shift+Space | Next / previous symbol |
 | Page Up / Page Down, Home / End | Jump through the list |
 | Enter | Show the selected symbol (or collapse a section) |
@@ -89,7 +90,8 @@ The extension uses the same services TradingView's website uses. They have no pu
 | File | Purpose |
 | --- | --- |
 | `manifest.json` | Manifest V3 definition |
-| `content.js` | Docks the watchlist inside TradingView, adds the toolbar button, handles resizing and theme |
+| `content.js` | Docks the watchlist inside TradingView, adds the toolbar button and the minimized pill, handles resizing and theme |
+| `early.js` | Loads before TradingView's scripts so ↑ / ↓ reach this watchlist first while the dock is open or minimized |
 | `background.js` | Extension icon and Alt+W toggle the dock |
 | `tv.js` | Bridge to TradingView: chart symbol, symbol search, prices, rate-limit detection |
 | `sidepanel.html`, `styles.css`, `app.js` | The watchlist UI |
