@@ -680,7 +680,7 @@ function renderRows() {
   }
   el.rows.replaceChildren(frag);
   el.rows.querySelectorAll('.row.sym').forEach(fitRow);
-  scheduleQuotes(rendered.some((s) => !quoteCache.has(s)) ? 400 : null);   // new rows: fetch once scrolling settles
+  if (initialDone && rendered.some((s) => s.includes(':') && !quoteCache.has(s))) scheduleQuotes(400);   // a newly added symbol's first price
 
   if (editingSym) {
     const inp = el.rows.querySelector('.note-input');
@@ -859,8 +859,45 @@ function pullQuotes(force = false) {
   return quotePromise;
 }
 
+// Prices are fetched for every symbol once, when the TradingView tab (re)loads.
+// After that they refresh only on the user's schedule (5s / 15s / 1m / Off).
+let initialDone = false;
+let dockHidden = false;
+async function loadAllQuotes() {
+  const all = new Set();
+  for (const l of data.lists) for (const it of l.items) if (it.s && it.s.includes(':')) all.add(it.s);
+  for (const s in data.meta) if (data.meta[s].f && s.includes(':')) all.add(s);
+  const order = [...rendered.filter((s) => all.has(s)), ...[...all].filter((s) => !rendered.includes(s))];   // on-screen first
+  for (let i = 0; i < order.length; i += 200) {
+    if (limited()) break;
+    const chunk = order.slice(i, i + 200);
+    try {
+      const res = await TV.quotes(chunk, { session: data.session });
+      failStreak = 0;
+      applyQuotes(res, chunk, Date.now());
+    } catch (e) {
+      if (e instanceof TV.RateLimited) hitLimit();
+      else { failStreak++; quoteStatus = { ...quoteStatus, failed: true }; }
+      break;
+    }
+    updatePriceStatus();
+    if (i + 200 < order.length) await pause(SEARCH_GAP);
+  }
+  initialDone = true;
+  updatePriceStatus();
+  if (rendered.some((s) => !s.includes(':'))) resolveBareSymbols();
+  scheduleQuotes();
+}
+window.addEventListener('message', (e) => {
+  if (e.source !== window.parent || !e.data || e.data.wl !== 'dockVisible') return;
+  // Opening or closing the dock never fetches or resets the schedule. The refresh
+  // timer keeps its own rhythm; refreshes that fall while the dock is closed are skipped.
+  dockHidden = !e.data.open;
+});
+
 async function fetchQuotes(force) {
-  if ((document.hidden && !force) || !rendered.length) { scheduleQuotes(); return; }
+  if (!initialDone && !force) return;   // the load-time fetch is still running; it schedules the next one
+  if (((document.hidden || dockHidden) && !force) || !rendered.length) { scheduleQuotes(); return; }
   if (limited()) { updatePriceStatus(); scheduleQuotes(); return; }
   const want = rendered.filter((s) => s.includes(':')).slice(0, 120);
   if (rendered.some((s) => !s.includes(':'))) resolveBareSymbols();
@@ -983,7 +1020,7 @@ function patchRow(q, prev) {
     setTimeout(() => price.classList.remove('tick-up', 'tick-down'), 60);
   }
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleQuotes(0); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleQuotes(); });
 
 /* ---------- list dropdown ---------- */
 function renderListMenu() {
@@ -1758,7 +1795,7 @@ el.refreshSeg.addEventListener('click', (e) => {
   data.refresh = Number(b.dataset.refresh);
   renderRefreshSeg();
   scheduleSave();
-  scheduleQuotes(data.refresh ? 0 : undefined);
+  scheduleQuotes();
 });
 function renderRefreshSeg() {
   el.refreshSeg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', Number(b.dataset.refresh) === data.refresh));
@@ -1787,7 +1824,6 @@ el.menu.addEventListener('click', (e) => {
     el.sessionToggle.classList.toggle('on', data.session);
     scheduleSave();
     toast(data.session ? 'Using your TradingView login for prices' : 'Using public prices', { type: 'info' });
-    pullQuotes(true);
     return;
   }
   if (act === 'wheel') {
@@ -1876,6 +1912,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) sche
   refresh();
   el.viewport.focus({ preventScroll: true });
   syncFromChart();
+  loadAllQuotes();
   setTimeout(resolveBareSymbols, 300);
   if (TV.embedded) window.parent.postMessage({ wl: 'ready' }, '*');
 })();

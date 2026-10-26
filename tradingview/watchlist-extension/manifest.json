@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Watchlist",
   "description": "A compact watchlist docked inside TradingView that holds up to 1,000 symbols per list. Click a symbol to switch the chart in place.",
-  "version": "1.4.0",
+  "version": "1.6.0",
   "action": {
     "default_title": "Toggle watchlist (Alt+W)"
   },

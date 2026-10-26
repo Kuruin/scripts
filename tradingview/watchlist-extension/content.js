@@ -202,20 +202,26 @@
   }).observe(document.documentElement, { childList: true, subtree: true });
 
   /* ---------- open / close ---------- */
+  // Closing hides the dock instead of removing it, so reopening doesn't reload
+  // the watchlist (and refetch every price). The watchlist pauses while hidden.
+  function tellFrame(open) {
+    if (frame && frame.contentWindow) frame.contentWindow.postMessage({ wl: 'dockVisible', open }, '*');
+  }
   function open() {
     if (!host) build();
-    if (!host.isConnected) {
-      (document.head || document.documentElement).appendChild(style);
-      document.body.appendChild(host);
-    }
+    if (!host.isConnected) document.body.appendChild(host);
+    host.style.display = 'flex';
+    if (!style.isConnected) (document.head || document.documentElement).appendChild(style);
     commitLayout();
     syncTheme();
+    tellFrame(true);
   }
   function close() {
-    if (host && host.isConnected) {
-      host.remove();
+    if (host && host.isConnected && host.style.display !== 'none') {
+      host.style.display = 'none';
       style.remove();
       window.dispatchEvent(new Event('resize'));
+      tellFrame(false);
     }
   }
   function render() {
@@ -246,7 +252,7 @@
   window.addEventListener('message', (e) => {
     if (!frame || e.source !== frame.contentWindow || !e.data) return;
     if (e.data.wl === 'close') setOpen(false);
-    if (e.data.wl === 'ready') syncTheme();
+    if (e.data.wl === 'ready') { syncTheme(); tellFrame(state.open); }
   });
 
   // Keep every TradingView tab in step (open/closed, width)

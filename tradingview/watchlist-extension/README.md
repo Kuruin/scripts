@@ -61,9 +61,10 @@ Each row shows the ticker on the left and the price over its change (points and 
 
 **Scroll switches chart** (⋯ menu) makes each mouse-wheel notch move to the next or previous symbol.
 
+
 ## Prices
 
-- **How often**: every 15 seconds by default, only for rows on screen, and only while the TradingView tab is visible. Choose 5s, 15s, 1 minute or Off in the ⋯ menu. The **↻** button in the footer syncs right away; the footer also shows when prices last updated.
+- **How often**: when the TradingView tab loads, prices are fetched once for every symbol in all your lists. After that they refresh only on your setting in the ⋯ menu: every 5s, 15s, 1 minute, or Off (manual). Refreshes cover the rows on screen and pause while the TradingView tab is in the background or the dock is closed. Scrolling, switching lists and reopening the dock use the prices already fetched; only a newly added symbol gets its first price right away. The **↻** button in the footer syncs at any time, and the footer shows when prices last updated.
 - **Live or delayed**: the footer says **Live** or **Delayed 15m**. TradingView delays some exchanges (often by 15 minutes) unless your TradingView plan includes real-time data for them. With **Use my TradingView login** on (the default), prices are fetched through your TradingView tab with your login, so you get whatever data your plan includes.
 - **No data**: a symbol TradingView has no price for shows "—" and "No data from TradingView".
 
@@ -71,7 +72,7 @@ Each row shows the ticker on the left and the price over its change (points and 
 
 The extension uses the same services TradingView's website uses. They have no published limits, so it is deliberately gentle:
 
-- one request at a time, for the rows on screen only;
+- one fetch of every symbol when the tab loads, then one request at a time for the rows on screen;
 - open docks in other tabs or windows share the prices they fetch instead of repeating the request;
 - after errors it waits longer between attempts;
 - if TradingView answers "slow down" or blocks a request, prices and symbol checks pause in every tab for 30 seconds, doubling each time up to 5 minutes. The footer shows **Paused** and the sync button is disabled until then;
