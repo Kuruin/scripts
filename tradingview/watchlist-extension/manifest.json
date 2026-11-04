@@ -1,17 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Watchlist",
-  "description": "A compact watchlist docked inside TradingView that holds up to 1,000 symbols per list. Click a symbol to switch the chart in place.",
-  "version": "1.7.0",
+  "name": "Dockside",
+  "description": "A bigger watchlist for TradingView. Docks beside the chart, holds up to 1,000 symbols per list, and switches the chart in place.",
+  "version": "1.8.0",
   "action": {
-    "default_title": "Toggle watchlist (Alt+W)"
+    "default_title": "Toggle Dockside (Alt+W)"
   },
   "commands": {
     "_execute_action": {
       "suggested_key": {
         "default": "Alt+W"
       },
-      "description": "Toggle the watchlist"
+      "description": "Toggle Dockside"
     }
   },
   "background": {

@@ -1,15 +1,16 @@
-# Watchlist (Chrome extension for TradingView)
+# Dockside (Chrome extension for TradingView)
 
-A slim watchlist that docks inside the TradingView page. It holds up to **1,000 symbols per list**, shows live or delayed prices, and switches the chart in place when you pick a symbol.
+Dockside is a slim watchlist that docks inside the TradingView page. It holds up to **1,000 symbols per list**, shows live or delayed prices, and switches the chart in place when you pick a symbol.
 
 Plain HTML, CSS and JavaScript: no build step, no dependencies.
 
 ## Install
 
-1. Open `chrome://extensions` (Edge: `edge://extensions`).
-2. Turn on **Developer mode**.
-3. Click **Load unpacked** and choose this `watchlist-extension` folder.
-4. On a TradingView chart, click the extension icon, the **Watchlist** button in TradingView's right toolbar, or press **Alt+W**.
+1. Download the latest `dockside-<version>.zip` from the repository's **Releases** page and unzip it (or use this `watchlist-extension` folder directly).
+2. Open `chrome://extensions` (Brave: `brave://extensions`, Edge: `edge://extensions`).
+3. Turn on **Developer mode**.
+4. Click **Load unpacked** and choose the unzipped folder.
+5. On a TradingView chart, click the extension icon, the **Dockside** button in TradingView's right toolbar, or press **Alt+W**.
 
 After changing any file, click the reload icon on the extension's card, then refresh your TradingView tab.
 
@@ -103,7 +104,7 @@ The extension uses the same services TradingView's website uses. They have no pu
 Zip the extension's files (not the folder) and upload the zip in the Chrome Web Store developer dashboard. From this folder in PowerShell:
 
 ```powershell
-Compress-Archive -Path manifest.json,*.js,*.html,*.css,icons -DestinationPath watchlist.zip -Force
+Compress-Archive -Path manifest.json,*.js,*.html,*.css,icons -DestinationPath dockside.zip -Force
 ```
 
 ## Disclaimer

@@ -1,11 +1,11 @@
-# Zips the Watchlist extension and publishes it under GitHub Releases.
+# Zips the Dockside extension and publishes it under GitHub Releases.
 #
 # Runs when a push to main changes the extension. It reads the version from
 # manifest.json and, if there's no release for that version yet, creates
-# tag watchlist-v<version> with the zip attached. Pushes that don't bump the
+# tag dockside-v<version> with the zip attached. Pushes that don't bump the
 # version do nothing, so: bump "version" in manifest.json to ship.
 # Can also be run by hand from the Actions tab.
-name: Release Watchlist extension
+name: Release Dockside extension
 
 on:
   push:
@@ -36,8 +36,8 @@ jobs:
         run: |
           version=$(jq -r .version "$EXT_DIR/manifest.json")
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=watchlist-v$version" >> "$GITHUB_OUTPUT"
-          echo "zip=watchlist-$version.zip" >> "$GITHUB_OUTPUT"
+          echo "tag=dockside-v$version" >> "$GITHUB_OUTPUT"
+          echo "zip=dockside-$version.zip" >> "$GITHUB_OUTPUT"
 
       - name: Skip if this version is already released
         id: check
@@ -58,7 +58,7 @@ jobs:
           # manifest.json at the zip's root, as Chrome expects. Leave out
           # development-only files (design skills, git files, old zips).
           zip -r -X "$GITHUB_WORKSPACE/${{ steps.meta.outputs.zip }}" . \
-            -x '.agents/*' 'skills-lock.json' '.git*' '*.zip' '_metadata/*' 'dev/*' 'prototypes/*'
+            -x '.agents/*' '.claude/*' 'skills-lock.json' '.git*' '*.zip' '_metadata/*' 'dev/*' 'prototypes/*'
           unzip -l "$GITHUB_WORKSPACE/${{ steps.meta.outputs.zip }}"
 
       - name: Publish release
@@ -68,6 +68,6 @@ jobs:
         run: |
           gh release create "${{ steps.meta.outputs.tag }}" "${{ steps.meta.outputs.zip }}" \
             --target "$GITHUB_SHA" \
-            --title "Watchlist ${{ steps.meta.outputs.version }}" \
+            --title "Dockside ${{ steps.meta.outputs.version }}" \
             --generate-notes \
-            --notes "Install: download ${{ steps.meta.outputs.zip }}, unzip it, open chrome://extensions, turn on Developer mode, click **Load unpacked** and pick the unzipped folder."
+            --notes "Install: download ${{ steps.meta.outputs.zip }}, unzip it, open chrome://extensions (or brave://extensions), turn on Developer mode, click **Load unpacked** and pick the unzipped folder."

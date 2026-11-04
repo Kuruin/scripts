@@ -182,8 +182,8 @@
       if (!ref) return;
       tvBtn = ref.cloneNode(true);                    // inherits TradingView's exact button styling
       tvBtn.dataset.name = 'wl-watchlist';
-      tvBtn.setAttribute('aria-label', 'Watchlist');
-      tvBtn.dataset.tooltip = 'Watchlist (Alt+W)';
+      tvBtn.setAttribute('aria-label', 'Dockside');
+      tvBtn.dataset.tooltip = 'Dockside (Alt+W)';
       tvBtn.removeAttribute('id');
       const icon = tvBtn.querySelector('svg');
       if (icon) icon.outerHTML = ICON; else tvBtn.innerHTML = ICON;
@@ -277,10 +277,10 @@
     pill = document.createElement('div');
     pill.id = 'wl-pill';
     pill.setAttribute('role', 'group');
-    pill.setAttribute('aria-label', 'Watchlist (minimized)');
+    pill.setAttribute('aria-label', 'Dockside (minimized)');
     pill.innerHTML =
-      '<button class="wlp-main" data-expand title="Expand the watchlist">' +
-        '<span class="wlp-sym">Watchlist</span><span class="wlp-pos"></span>' +
+      '<button class="wlp-main" data-expand title="Expand Dockside">' +
+        '<span class="wlp-sym">Dockside</span><span class="wlp-pos"></span>' +
       '</button>' +
       '<span class="wlp-steps">' +
         `<button data-step="-1" title="Previous symbol (↑)" aria-label="Previous symbol">${chev('m6 15 6-6 6 6')}</button>` +
@@ -352,7 +352,7 @@
     if (!pill || !info) return;
     const sym = pill.querySelector('.wlp-sym');
     const pos = pill.querySelector('.wlp-pos');
-    const list = info.list || 'Watchlist';
+    const list = info.list || 'Dockside';
     if (!info.sym) {
       sym.textContent = list;
       // Empty list, or the chart is on a symbol outside this list.
