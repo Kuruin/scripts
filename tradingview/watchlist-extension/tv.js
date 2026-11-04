@@ -272,19 +272,10 @@ window.TV = (() => {
     });
   }
 
-  // ---------- close the side panel ----------
-  async function closePanel() {
-    if (embedded) {
-      window.parent.postMessage({ wl: 'close' }, '*');
-      return;
-    }
-    try {
-      if (typeof chrome !== 'undefined' && chrome.sidePanel && chrome.sidePanel.close) {
-        await chrome.sidePanel.close({ windowId: await windowId() });
-        return;
-      }
-    } catch (e) {}
-    window.close();
+  // ---------- close the watchlist ----------
+  function closePanel() {
+    if (embedded) window.parent.postMessage({ wl: 'close' }, '*');
+    else window.close();
   }
 
   return { available, embedded, RateLimited, quotes, showSymbol, currentSymbol, status, open, onTabsChanged, search, closePanel };

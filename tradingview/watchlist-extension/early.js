@@ -24,6 +24,7 @@
   let at = 0;
   window.addEventListener('keydown', (e) => {
     if (mode !== 'open' && mode !== 'mini') return;
+    if (!/^\/chart(\/|$)/.test(location.pathname)) return;   // home, news, screener...: keys behave as usual
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (busy(e.target)) return;

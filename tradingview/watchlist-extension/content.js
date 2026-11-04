@@ -24,6 +24,7 @@
 
   const clamp = (w) => Math.max(MIN_W, Math.min(MAX_W, Math.round(w) || DEFAULT_W));
   const $ = (sel) => document.querySelector(sel);
+  const onChart = () => /^\/chart(\/|$)/.test(location.pathname);
 
   /* ---------- geometry ---------- */
   // Width and top of TradingView's right area (toolbar + any open TV widget panel).
@@ -234,7 +235,9 @@
   }
   function render() {
     if (state.mode === 'open') { open(); hidePill(); }
-    else if (state.mode === 'mini') { close(); showPill(); }
+    // The pill (and the ↑ / ↓ takeover in early.js) only belong on a chart: on TradingView's
+    // other pages there's no chart to switch, and the arrow keys must scroll as usual.
+    else if (state.mode === 'mini') { close(); if (onChart()) showPill(); else hidePill(); }
     else { close(); hidePill(); }
     syncButton();
   }

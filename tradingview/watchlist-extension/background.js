@@ -2,13 +2,6 @@
 const TV_HOME = 'https://www.tradingview.com/chart/';
 const isTV = (url) => /^https?:\/\/([a-z0-9-]+\.)*tradingview\.com\//i.test(url || '');
 
-// Earlier versions used Chrome's side panel; make sure it no longer grabs the click.
-chrome.runtime.onInstalled.addListener(() => {
-  if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
-  }
-});
-
 chrome.action.onClicked.addListener((tab) => toggle(tab));
 
 async function toggle(tab) {
