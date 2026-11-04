@@ -4,6 +4,16 @@ const isTV = (url) => /^https?:\/\/([a-z0-9-]+\.)*tradingview\.com\//i.test(url 
 
 chrome.action.onClicked.addListener((tab) => toggle(tab));
 
+// TradingView tabs that were already open on install, or that still run the previous
+// version after an update, get the current scripts without needing a reload.
+chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+  if (reason !== 'install' && reason !== 'update') return;
+  const tabs = await chrome.tabs.query({ url: '*://*.tradingview.com/*' }).catch(() => []);
+  for (const t of tabs) {
+    chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['early.js', 'content.js'] }).catch(() => {});
+  }
+});
+
 async function toggle(tab) {
   if (tab && isTV(tab.url)) {
     await send(tab.id, 'toggle');
@@ -64,18 +74,27 @@ async function position(tabId) {
   const { name, syms } = activeSymbols(wl);
   const key = 'step:' + tabId;
   const last = (await chrome.storage.session.get(key))[key];
+  const cur = await chartSymbol(tabId);
   let i = -1;
-  // Rapid presses: the chart takes a moment to report its new symbol, so continue
-  // from where the last step landed if that was recent.
-  if (last && Date.now() - last.at < 4000 && last.list === wl.active && syms[last.i] === last.sym) i = last.i;
-  if (i < 0) {
-    const cur = await chartSymbol(tabId);
-    if (cur) {
-      i = syms.indexOf(cur);
-      if (i < 0) i = syms.findIndex((s) => tickerOf(s) === tickerOf(cur));
-    }
+  // Rapid presses: the chart takes a moment to report its new symbol, so continue from
+  // where the last step landed, as long as the chart still shows a symbol from this run
+  // of steps. Anything else means the symbol was changed some other way (a click in the
+  // dock, TradingView's own UI): start from what the chart shows.
+  const trail = last && Date.now() - last.at < 4000 && last.list === wl.active && syms[last.i] === last.sym ? last.trail || [] : null;
+  if (trail && (!cur || trail.includes(tickerOf(cur)))) i = last.i;
+  else if (cur) {
+    i = syms.indexOf(cur);
+    if (i < 0) i = syms.findIndex((s) => tickerOf(s) === tickerOf(cur));
   }
-  return { syms, name, i, key, active: wl.active };
+  return { syms, name, i, key, active: wl.active, trail: trail || (cur ? [tickerOf(cur)] : []) };
+}
+
+// One step at a time per tab, so a held key doesn't read the same position twice.
+const queues = new Map();
+function queueStep(tabId, dir) {
+  const run = (queues.get(tabId) || Promise.resolve()).then(() => step(tabId, dir)).catch(() => {});
+  queues.set(tabId, run);
+  run.then(() => { if (queues.get(tabId) === run) queues.delete(tabId); });
 }
 
 async function step(tabId, dir) {
@@ -87,7 +106,8 @@ async function step(tabId, dir) {
     try { window.TradingViewApi.activeChart().setSymbol(s); return true; } catch (e) { return false; }
   }, [sym]);
   if (!ok) return;
-  await chrome.storage.session.set({ [p.key]: { i: next, sym, list: p.active, at: Date.now() } });
+  const trail = [...p.trail, tickerOf(sym)].slice(-40);
+  await chrome.storage.session.set({ [p.key]: { i: next, sym, list: p.active, at: Date.now(), trail } });
   report(tabId, { sym, n: next + 1, total: p.syms.length, list: p.name });
 }
 
@@ -97,7 +117,7 @@ function report(tabId, info) {
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!msg || !sender.tab || !isTV(sender.tab.url)) return;
-  if (msg.wl === 'step') { step(sender.tab.id, msg.dir > 0 ? 1 : -1).catch(() => {}); return; }
+  if (msg.wl === 'step') { queueStep(sender.tab.id, msg.dir > 0 ? 1 : -1); return; }
   if (msg.wl === 'where') {
     // Where the chart is in the list right now (for the pill when it appears).
     position(sender.tab.id).then((p) => {

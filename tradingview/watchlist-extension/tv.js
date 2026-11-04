@@ -71,8 +71,10 @@ window.TV = (() => {
     return r ? r.result : undefined;
   }
 
-  // Returns 'set' | 'navigated' | 'opened' | 'external'
+  // Returns 'set' | 'navigated' | 'opened' | 'external' | 'failed' | 'superseded'
+  let showSeq = 0;
   async function showSymbol(symbol) {
+    const mine = ++showSeq;
     if (!available) {
       window.open(CHART_URL(symbol), '_blank', 'noopener');
       return 'external';
@@ -84,9 +86,17 @@ window.TV = (() => {
     }
     if (!tab.active) await chrome.tabs.update(tab.id, { active: true });
     if (isChart(tab.url)) {
-      try {
-        if ((await run(tab.id, inPageSetSymbol, [symbol])) === true) return 'set';
-      } catch (e) {}
+      // Never reload a chart page to switch symbols: that would also reload the dock and
+      // drop the chart layout. The chart API may just not be ready yet (page still
+      // loading), so retry for a few seconds. A newer click takes over.
+      for (let i = 0; i < 6; i++) {
+        if (mine !== showSeq) return 'superseded';
+        try {
+          if ((await run(tab.id, inPageSetSymbol, [symbol])) === true) return 'set';
+        } catch (e) {}
+        await new Promise((res) => setTimeout(res, 500));
+      }
+      return 'failed';
     }
     await chrome.tabs.update(tab.id, { url: CHART_URL(symbol) });
     return 'navigated';
@@ -119,9 +129,19 @@ window.TV = (() => {
     else await chrome.tabs.create({ windowId: await windowId(), url: TV_HOME });
   }
 
+  // Calls cb when the chart may show a different symbol. A docked watchlist only cares
+  // about its own tab, and TradingView rewrites the title on every price tick, so a title
+  // change counts only when its first word (the symbol) changes.
+  const titleSym = new Map();
   function onTabsChanged(cb) {
     if (!available) return;
     chrome.tabs.onUpdated.addListener((id, info) => {
+      if (embedded && ownTabId != null && id !== ownTabId) return;
+      if (info.title) {
+        const s = info.title.split(' ')[0];
+        if (titleSym.get(id) === s && !info.url && info.status !== 'complete') return;
+        titleSym.set(id, s);
+      }
       if (info.status === 'complete' || info.url || info.title) cb();
     });
     chrome.tabs.onActivated.addListener(cb);

@@ -6,8 +6,14 @@
 // the screen edge, and place the dock in the space that opens up. Panel colour
 // and gap colour are read from TradingView itself.
 (() => {
-  if (window.__wlDock) return;
-  window.__wlDock = true;
+  // After an extension update this copy is orphaned (its chrome.* calls throw) and a
+  // fresh copy is injected. The fresh one clears what the orphan left on the page;
+  // the orphan also takes itself down the next time the page changes.
+  const alive = () => { try { return !!chrome.runtime.id; } catch (e) { return false; } };
+  if (window.__wlDock && window.__wlDock.alive()) return;
+  window.__wlDock = { alive };
+  document.querySelectorAll('#wl-dock-host, #wl-dock-style, #wl-pill, #wl-pill-style, [data-name="wl-watchlist"]').forEach((n) => n.remove());
+  window.dispatchEvent(new Event('resize'));
 
   const MIN_W = 150;
   const MAX_W = 520;
@@ -193,14 +199,21 @@
   }
   // TradingView re-renders its toolbar now and then; put the button back when it does.
   let watchRaf = 0;
-  new MutationObserver(() => {
+  const watcher = new MutationObserver(() => {
+    if (!alive()) { teardown(); return; }
     if (watchRaf) return;
     watchRaf = requestAnimationFrame(() => {
       watchRaf = 0;
       if (!tvBtn || !tvBtn.isConnected) injectButton();
       if (state.mode === 'open' && host && !(handle && handle.dragging)) placeDock();
     });
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  });
+  watcher.observe(document.documentElement, { childList: true, subtree: true });
+  function teardown() {
+    watcher.disconnect();
+    for (const n of [host, style, tvBtn, pill, pillCss]) if (n && n.isConnected) n.remove();
+    window.dispatchEvent(new Event('resize'));
+  }
 
   /* ---------- open / minimized / closed ----------
      open:      the dock, docked in TradingView's layout
@@ -257,6 +270,7 @@
      the chart, with ▲/▼ beside it. Switching symbols
      is not animated (it can happen many times a minute); the pill only fades in. */
   let pill = null;
+  let pillCss = null;     // the pill's stylesheet (this copy's own, for teardown)
   const chev = (d) => `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
 
   function buildPill() {
@@ -292,7 +306,7 @@
       }
     }, { passive: false });
 
-    const css = document.createElement('style');
+    const css = pillCss = document.createElement('style');
     css.id = 'wl-pill-style';
     css.textContent = `
       #wl-pill { position: fixed; z-index: 21; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px;
@@ -358,8 +372,27 @@
     pill.classList.remove('wlp-in');
     void pill.offsetWidth;
     pill.classList.add('wlp-in');
-    chrome.runtime.sendMessage({ wl: 'where' }).then(setPill).catch(() => {});
+    askWhere(0);
+    askWhere(1500, true);   // TradingView may not have been ready to say which symbol it shows
   }
+  // Ask the background where the chart is in the list. Debounced; `extra` runs alongside.
+  let whereTimer = 0;
+  function askWhere(delay, extra = false) {
+    const go = () => { try { chrome.runtime.sendMessage({ wl: 'where' }).then(setPill).catch(() => {}); } catch (e) {} };
+    if (extra) { setTimeout(go, delay); return; }
+    clearTimeout(whereTimer);
+    whereTimer = setTimeout(go, delay);
+  }
+  // Follow symbol changes made outside the watchlist (TradingView's own search or
+  // watchlist): the page title starts with the symbol. Price ticks also change the
+  // title, so only a new first word counts.
+  let titleSym = '';
+  new MutationObserver(() => {
+    const s = (document.title || '').split(' ')[0];
+    if (s === titleSym) return;
+    titleSym = s;
+    if (state.mode === 'mini' && pill && pill.style.display !== 'none') askWhere(300);
+  }).observe(document.head || document.documentElement, { subtree: true, childList: true, characterData: true });
   function hidePill() {
     if (pill) pill.style.display = 'none';
   }

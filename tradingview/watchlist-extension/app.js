@@ -68,6 +68,7 @@ let view = [];                // indices into src.items, in display order
 let secCount = new Map();
 let activeIdx = -1;           // keyboard selection (index into view)
 let editingSym = null;        // symbol whose note is being edited
+let noteDraft = null;         // what has been typed in it so far (survives re-renders)
 let currentSym = null;        // symbol on the TradingView chart
 let currentItemIdx = -1;
 let saveTimer = null;
@@ -85,7 +86,10 @@ function defaultData() {
 
 // Accepts any earlier version and upgrades it in place.
 function migrate(d) {
-  if (!d || !Array.isArray(d.lists) || !d.lists.length) return defaultData();
+  // Nothing saved yet: start from the defaults, then fill in the settings below like any
+  // other save. No lists left: give back a Default list but keep tags, notes and settings.
+  if (!d || typeof d !== 'object') d = defaultData();
+  if (!Array.isArray(d.lists) || !d.lists.length) { const fresh = defaultData(); d.lists = fresh.lists; d.active = fresh.active; }
   d.meta = d.meta || {};
   for (const l of d.lists) {
     l.id = l.id || uid();
@@ -303,9 +307,12 @@ const plural = (n, word) => `${nf(0).format(n)} ${word}${n === 1 ? '' : 's'}`;
 const validating = new Set();
 // TradingView writes dashes in tickers as underscores: NSE:BAJAJ-AUTO is NSE:BAJAJ_AUTO.
 const tvSpelling = (s) => s.replace(/-/g, '_');
-async function validateAdded(syms) {
-  if (!syms || !syms.length) return { failed: [], stopped: false };
-  const target = data.active;
+// Returns the symbols TradingView doesn't list (removed from `target`), whether checking
+// stopped early, and the full EXCH:SYM symbols it never got to (bare tickers left over
+// are matched later by resolveBareSymbols).
+async function validateAdded(syms, target = data.active) {
+  if (!syms || !syms.length) return { failed: [], stopped: false, unchecked: [] };
+  const done = new Set();
   syms.forEach((s) => validating.add(s));
   const failed = [];
   let renamed = 0, checked = 0, stopped = false;
@@ -325,8 +332,8 @@ async function validateAdded(syms) {
       const got = new Set((await TV.quotes(ask, { session: data.session })).map((q) => q.sym));
       let ok = 0;
       for (const s of chunk) {
-        if (got.has(s)) ok++;
-        else if (got.has(tvSpelling(s))) { renameSymbol(s, tvSpelling(s)); renamed++; ok++; }
+        if (got.has(s)) { ok++; done.add(s); }
+        else if (got.has(tvSpelling(s))) { renameSymbol(s, tvSpelling(s)); renamed++; ok++; done.add(s); }
         else notFound.push(s);
       }
       tick(ok);
@@ -340,6 +347,7 @@ async function validateAdded(syms) {
       const hit = res.find((r) => r.id === s || r.id === tvSpelling(s));
       if (!hit) failed.push(s);
       else if (hit.id !== s) { renameSymbol(s, hit.id, hit.logos[0]); renamed++; }
+      done.add(s);
       tick(1);
       await pause(SEARCH_GAP);
     }
@@ -364,7 +372,28 @@ async function validateAdded(syms) {
   }
   if (failed.length) removeSymbols(failed, target);
   if (renamed || failed.length) { scheduleSave(); refresh(); }
-  return { failed, stopped };
+  return { failed, stopped, unchecked: syms.filter((s) => s.includes(':') && !done.has(s)) };
+}
+
+// Symbols whose check was cut short (paused by TradingView, or offline) are checked
+// again once the pause is over. Keyed by symbol; the value is the list it was added to.
+const pendingCheck = new Map();
+let pendingTimer = 0;
+function checkLater(syms, target, attempt = 1) {
+  if (attempt > 5) return;   // still unreachable: they stay, and show "No data" if wrong
+  syms.forEach((s) => pendingCheck.set(s, target));
+  clearTimeout(pendingTimer);
+  pendingTimer = setTimeout(async () => {
+    const inLists = new Set(data.lists.flatMap((l) => l.items.filter((i) => i.s).map((i) => i.s)));
+    const byTarget = new Map();
+    for (const [s, key] of pendingCheck) if (inLists.has(s)) byTarget.set(key, [...(byTarget.get(key) || []), s]);
+    pendingCheck.clear();
+    for (const [key, list] of byTarget) {
+      const { failed, unchecked } = await validateAdded(list, key);
+      if (failed.length) reportNotAdded(failed);
+      if (unchecked.length) checkLater(unchecked, key, attempt + 1);
+    }
+  }, Math.max(0, backoffUntil - Date.now()) + 15000 * attempt);
 }
 
 // Copy symbols as "A, B, C" and confirm on the button itself.
@@ -384,7 +413,9 @@ async function copyList(list, btn) {
 async function addAndValidate(entries) {
   const listName = src.name;
   const res = addEntries(entries, { quiet: true });
-  const { failed, stopped } = await validateAdded(res.syms);
+  const target = data.active;
+  const { failed, stopped, unchecked } = await validateAdded(res.syms, target);
+  if (unchecked.length) checkLater(unchecked, target);
   const ok = res.added - failed.length;
   if (res.overflow) toast('List is full', { type: 'error', description: `${plural(res.overflow, 'symbol')} weren't added. A list holds up to ${nf(0).format(MAX_ITEMS)}.` });
   if (ok > 0) {
@@ -397,17 +428,19 @@ async function addAndValidate(entries) {
   } else if (res.dupes && !failed.length && !res.overflow) {
     toast(res.dupes === 1 ? 'Already in this list' : `All ${res.dupes} symbols are already in ${listName}`, { type: 'info' });
   }
-  if (failed.length) {
-    const names = failed.map((x) => tickerOf(x));
-    toast(failed.length === 1 ? `${names[0]} wasn't added` : `${failed.length} symbols weren't added`, {
-      type: 'error',
-      duration: 12000,
-      description: failed.length === 1
-        ? "TradingView doesn't list it. Check the ticker and exchange."
-        : "TradingView doesn't list these. Check the tickers and exchanges.",
-      action: { label: failed.length === 1 ? 'Copy symbol' : `Copy ${failed.length} symbols`, icon: 'copy', onClick: (btn) => copyList(failed, btn) },
-    });
-  }
+  if (failed.length) reportNotAdded(failed);
+}
+
+function reportNotAdded(failed) {
+  const names = failed.map((x) => tickerOf(x));
+  toast(failed.length === 1 ? `${names[0]} wasn't added` : `${failed.length} symbols weren't added`, {
+    type: 'error',
+    duration: 12000,
+    description: failed.length === 1
+      ? "TradingView doesn't list it. Check the ticker and exchange."
+      : "TradingView doesn't list these. Check the tickers and exchanges.",
+    action: { label: failed.length === 1 ? 'Copy symbol' : `Copy ${failed.length} symbols`, icon: 'copy', onClick: (btn) => copyList(failed, btn) },
+  });
 }
 
 function removeSymbols(syms, key) {
@@ -420,9 +453,11 @@ function removeSymbols(syms, key) {
   syms.forEach((s) => quoteCache.delete(s));
 }
 
-function removeAt(itemIdx) {
-  const it = src.items[itemIdx];
-  if (!it) return;
+// `item` is the item itself, not its index: by the time a removal runs (after the row's
+// exit animation) earlier removals may have shifted the indexes.
+function removeItem(it) {
+  const itemIdx = src.items.indexOf(it);
+  if (!it || itemIdx < 0) return;   // already gone
   if (src.kind === 'tag') {
     setMeta(it.s, { f: '' });
     refresh();
@@ -450,10 +485,16 @@ function toggleSection(itemIdx) {
   buildView();
 }
 
+// After a dialog, look things up again: another open dock may have saved meanwhile,
+// which replaces `data`, so objects held from before the dialog are stale.
 async function renameSection(itemIdx) {
-  const it = src.items[itemIdx];
-  const name = await askText('Rename section', it.sec);
-  if (!name || name === it.sec) return;
+  const listId = src.list && src.list.id;
+  const old = src.items[itemIdx].sec;
+  const name = await askText('Rename section', old);
+  if (!name || name === old) return;
+  const items = data.lists.find((x) => x.id === listId)?.items || [];
+  const it = items[itemIdx]?.sec === old ? items[itemIdx] : items.find((x) => x.sec === old);
+  if (!it) return;
   it.sec = name;
   scheduleSave();
   renderRows();
@@ -468,6 +509,7 @@ function showOnChart(sym, delay = 0) {
   chartTimer = setTimeout(async () => {
     const r = await TV.showSymbol(sym);
     if (r === 'opened') toast('Opened TradingView');
+    else if (r === 'failed') toast(`Couldn't switch the chart to ${tickerOf(sym)}`, { type: 'error', description: "TradingView's chart isn't responding. Try again in a moment." });
     updateFooter();
   }, delay);
 }
@@ -664,7 +706,7 @@ function renderRows() {
     row.title = q && q.name ? `${it.s} · ${q.name}` : it.s;
     const tagColor = m.f ? TAG[m.f].color : null;
     const sub = editingSym === it.s
-      ? `<input class="note-input" data-act="note" maxlength="120" placeholder="Add a note" value="${esc(m.n || '')}">`
+      ? `<input class="note-input" data-act="note" maxlength="120" placeholder="Add a note" value="${esc(noteDraft ?? m.n ?? '')}">`
       : m.n
         ? `<span class="name note">${esc(m.n)}</span>`
         : q && q.missing ? `<span class="name">No data from TradingView</span>` : '';
@@ -680,11 +722,19 @@ function renderRows() {
   }
   el.rows.replaceChildren(frag);
   el.rows.querySelectorAll('.row.sym').forEach(fitRow);
-  if (initialDone && rendered.some((s) => s.includes(':') && !quoteCache.has(s))) scheduleQuotes(400);   // a newly added symbol's first price
+  // A newly added symbol's first price; not while TradingView is failing or has asked us to wait.
+  if (initialDone && !failStreak && !limited() && rendered.some((s) => s.includes(':') && !quoteCache.has(s))) scheduleQuotes(400);
 
   if (editingSym) {
     const inp = el.rows.querySelector('.note-input');
-    if (inp && document.activeElement !== inp) { inp.focus(); inp.select(); }
+    if (!inp) {
+      // The row scrolled out of view (or left the list): keep what was typed and stop editing.
+      commitNote(noteDraft ?? meta(editingSym).n ?? '');
+    } else if (document.activeElement !== inp) {
+      inp.focus();
+      if (noteDraft === null) inp.select();                                  // just opened: select the old note
+      else inp.setSelectionRange(inp.value.length, inp.value.length);        // re-rendered mid-typing: keep going
+    }
   }
 }
 
@@ -849,6 +899,7 @@ function hitLimit(fromPeer = false, peer = null) {
 }
 
 function scheduleQuotes(delay) {
+  if (!data) return;   // still starting up: init schedules the first fetch
   clearTimeout(quoteTimer);
   if (delay == null) {
     if (!data.refresh) { if (limited()) quoteTimer = setTimeout(updatePriceStatus, backoffUntil - Date.now() + 250); return; }
@@ -874,6 +925,7 @@ async function loadAllQuotes() {
   const all = new Set();
   for (const l of data.lists) for (const it of l.items) if (it.s && it.s.includes(':')) all.add(it.s);
   for (const s in data.meta) if (data.meta[s].f && s.includes(':')) all.add(s);
+  for (const s of quoteCache.keys()) all.delete(s);   // already shared by another open dock
   const order = [...rendered.filter((s) => all.has(s)), ...[...all].filter((s) => !rendered.includes(s))];   // on-screen first
   for (let i = 0; i < order.length; i += 200) {
     if (limited()) break;
@@ -881,7 +933,9 @@ async function loadAllQuotes() {
     try {
       const res = await TV.quotes(chunk, { session: data.session });
       failStreak = 0;
-      applyQuotes(res, chunk, Date.now());
+      const at = Date.now();
+      applyQuotes(res, chunk, at);
+      bc?.postMessage({ type: 'quotes', at, want: chunk, quotes: res });   // other docks skip these
     } catch (e) {
       if (e instanceof TV.RateLimited) hitLimit();
       else { failStreak++; quoteStatus = { ...quoteStatus, failed: true }; }
@@ -901,7 +955,21 @@ window.addEventListener('message', (e) => {
   // Opening or closing the dock never fetches or resets the schedule. The refresh
   // timer keeps its own rhythm; refreshes that fall while the dock is closed are skipped.
   dockHidden = !e.data.open;
+  startLoading();
+  if (!dockHidden) scheduleSync();
 });
+
+// The one full price load (and bare-ticker matching) per TradingView tab load waits until
+// this dock is actually on screen: opening the dock opens it in every TradingView tab, and
+// background tabs shouldn't all fetch at once.
+let loadStarted = false;
+function startLoading() {
+  if (loadStarted || !data || document.hidden || dockHidden) return;
+  loadStarted = true;
+  loadAllQuotes();
+  setTimeout(resolveBareSymbols, 300);
+}
+document.addEventListener('visibilitychange', startLoading);
 
 async function fetchQuotes(force) {
   if (!initialDone && !force) return;   // the load-time fetch is still running; it schedules the next one
@@ -947,6 +1015,7 @@ function applyQuotes(res, want, at) {
 
 if (bc) {
   bc.onmessage = (e) => {
+    if (!data) return;   // still starting up
     const m = e.data || {};
     if (m.type === 'quotes' && Array.isArray(m.quotes)) {
       shared = { at: m.at, syms: new Set(m.want || []) };
@@ -1536,6 +1605,7 @@ function updateFooterText() {
 }
 let syncTimer;
 async function syncFromChart() {
+  if (!data) return;
   const sym = await TV.currentSymbol();
   // Ignore stale reports while the user is stepping through the list
   if (sym && Date.now() - lastNavAt > 1500 && (!currentSym || tickerOf(sym) !== tickerOf(currentSym))) {
@@ -1545,7 +1615,8 @@ async function syncFromChart() {
   }
   updateFooter();
 }
-const scheduleSync = () => { clearTimeout(syncTimer); syncTimer = setTimeout(syncFromChart, 400); };
+// Hidden (closed or minimized) docks don't follow the chart; opening the dock catches up.
+const scheduleSync = () => { if (dockHidden) return; clearTimeout(syncTimer); syncTimer = setTimeout(syncFromChart, 400); };
 
 /* ---------- import / export ---------- */
 function exportList() {
@@ -1593,7 +1664,9 @@ async function renameList(id) {
   if (!l) return;
   const name = await askText('Rename list', l.name);
   if (!name || name === l.name) return;
-  l.name = name;
+  const cur = data.lists.find((x) => x.id === l.id);
+  if (!cur) return;
+  cur.name = name;
   scheduleSave();
   refresh();
 }
@@ -1605,6 +1678,8 @@ async function deleteList(id) {
   const n = symbolCount(l.items);
   const ok = await askConfirm(`Delete "${l.name}"?`, n ? `This removes its ${n} symbol${n === 1 ? '' : 's'}. Their tags stay in your tag lists.` : 'This list is empty.');
   if (!ok) return;
+  if (!data.lists.some((x) => x.id === l.id)) return;                  // already deleted elsewhere
+  if (data.lists.length === 1) return toast('Keep at least one list');
   const wasActive = data.active === 'list:' + l.id;
   data.lists = data.lists.filter((x) => x.id !== l.id);
   scheduleSave();
@@ -1752,7 +1827,12 @@ el.rows.addEventListener('click', (e) => {
   const actEl = e.target.closest('[data-act]');
   const act = actEl?.dataset.act;
   if (act === 'flag') { e.stopPropagation(); openFlagPop(it.s, actEl); return; }
-  if (act === 'del') { e.stopPropagation(); animateOut(row, () => removeAt(idx)); return; }
+  if (act === 'del') {
+    e.stopPropagation();
+    if (row.classList.contains('removing')) return;   // a second click on the same ×
+    animateOut(row, () => removeItem(it));
+    return;
+  }
   if (act === 'note' || editingSym) return;
   activeIdx = Number(row.dataset.vi);
   el.viewport.focus({ preventScroll: true });
@@ -1766,21 +1846,27 @@ el.rows.addEventListener('dblclick', (e) => {
   const it = src.items[idx];
   if (it.sec) { renameSection(idx); return; }
   editingSym = it.s;
+  noteDraft = null;
   renderRows();
 });
 el.rows.addEventListener('keydown', (e) => {
   if (!e.target.classList.contains('note-input')) return;
   e.stopPropagation();
   if (e.key === 'Enter') commitNote(e.target.value);
-  if (e.key === 'Escape') { editingSym = null; renderRows(); el.viewport.focus(); }
+  if (e.key === 'Escape') { editingSym = null; noteDraft = null; renderRows(); el.viewport.focus(); }
+});
+el.rows.addEventListener('input', (e) => {
+  if (e.target.classList.contains('note-input')) noteDraft = e.target.value;
 });
 el.rows.addEventListener('focusout', (e) => {
   if (e.target.classList.contains('note-input')) commitNote(e.target.value);
 });
 function commitNote(value) {
   if (!editingSym) return;
-  setMeta(editingSym, { n: value.trim() });
+  const sym = editingSym;
   editingSym = null;
+  noteDraft = null;
+  setMeta(sym, { n: value.trim() });
   buildView();
   el.viewport.focus({ preventScroll: true });
 }
@@ -1800,7 +1886,7 @@ el.viewport.addEventListener('keydown', (e) => {
   else if (k === 'Enter' && activeIdx >= 0) {
     const idx = view[activeIdx];
     if (src.items[idx].sec) toggleSection(idx); else showOnChart(src.items[idx].s);
-  } else if ((k === 'Delete' || k === 'Backspace') && activeIdx >= 0) { e.preventDefault(); removeAt(view[activeIdx]); }
+  } else if ((k === 'Delete' || k === 'Backspace') && activeIdx >= 0) { e.preventDefault(); removeItem(src.items[view[activeIdx]]); }
 });
 
 // Theme: system -> light -> dark
@@ -1912,8 +1998,7 @@ if (hasChromeStorage) {
     if (area !== 'local' || !changes.wl || !changes.wl.newValue) return;
     if (JSON.stringify(changes.wl.newValue) === lastSaved) return;
     data = migrate(changes.wl.newValue);
-    editingSym = null;
-    refresh();
+    refresh();   // a note being typed stays open, with its draft, on top of the new data
   });
 }
 
@@ -1928,7 +2013,6 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) sche
   refresh();
   el.viewport.focus({ preventScroll: true });
   syncFromChart();
-  loadAllQuotes();
-  setTimeout(resolveBareSymbols, 300);
+  startLoading();
   if (TV.embedded) window.parent.postMessage({ wl: 'ready' }, '*');
 })();
