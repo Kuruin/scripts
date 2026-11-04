@@ -956,7 +956,7 @@ window.addEventListener('message', (e) => {
   // timer keeps its own rhythm; refreshes that fall while the dock is closed are skipped.
   dockHidden = !e.data.open;
   startLoading();
-  if (!dockHidden) scheduleSync();
+  if (!dockHidden) { if (src) renderRows(); scheduleSync(); }
 });
 
 // The one full price load (and bare-ticker matching) per TradingView tab load waits until
@@ -1790,6 +1790,16 @@ el.searchInput.addEventListener('keydown', (e) => {
 
 el.viewport.addEventListener('scroll', renderRows, { passive: true });
 window.addEventListener('resize', renderRows);
+// Rows are only drawn for the visible height. A redraw while the dock is hidden (minimized
+// or closed) sees a height of 0, and showing the dock again fires no window resize: redraw
+// when the list's own size changes.
+if (typeof ResizeObserver !== 'undefined') {
+  let lastH = -1;
+  new ResizeObserver(() => {
+    const h = el.viewport.clientHeight;
+    if (h !== lastH) { lastH = h; if (src) renderRows(); }
+  }).observe(el.viewport);
+}
 
 // Optional: mouse wheel steps through symbols and switches the chart.
 let wheelAcc = 0, wheelAt = 0;
